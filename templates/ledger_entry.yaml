@@ -1,0 +1,12 @@
+# 仅在用户实际确认后填写，不为效果预览盖章。
+episodes:
+  - ep: 1
+    revealed: []
+    threads_setup: []
+    threads_payoff: []
+    identities_known: {}
+    open_questions: []
+    takeaways_delivered: []
+    recap_points: []
+    deviations_from_plan: []
+    devices: {}

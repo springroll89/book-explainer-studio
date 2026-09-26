@@ -1,0 +1,21 @@
+# 默认只作编辑提示，未经过用户风格校准；不要机械替换同义词。
+version: 1
+status: uncalibrated
+rules:
+  - id: empty-introduction
+    level: warn
+    max: 0
+    scope: opening
+    window: 120
+    patterns: ['今天我们深入探讨', '让我们一同走进', '这本书发人深省']
+    desc: 空泛开场换成正文能兑现的问题或细节。
+  - id: empty-transition
+    level: warn
+    max: 1
+    patterns: ['值得注意的是', '不难发现', '综上所述', '这不仅仅是']
+    desc: 检查是否推进论证，没有信息增量则删除。
+  - id: audience-presumption
+    level: warn
+    max: 0
+    patterns: ['你一定震惊了', '所有人都不知道', '看完彻底改变人生']
+    desc: 删除无依据的反应预测或效果承诺，改说事实及边界。

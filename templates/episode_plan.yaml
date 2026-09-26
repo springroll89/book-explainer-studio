@@ -1,0 +1,25 @@
+episodes:
+  - ep: 1
+    title_working: 一句话工作标题
+    covers: [ch01]
+    genre_mode: suspense
+    target_chars: 2800
+    core_question: 当前冲突中牵引读者向前的具体问题
+    takeaways:
+      - id: K1
+        layer: 2
+        core: true
+        text: 从场景中能理解的人物处境、受限选择或关系变化
+        evidence: [p00001]
+      - id: K2
+        layer: 3
+        core: true
+        text: 前后照应或信息揭示如何改变理解，可由剧情本身承载
+        evidence: [p00001]
+    threads_setup: []
+    threads_payoff: []
+    reveal: []
+    withhold: []
+    cliffhanger: null
+    recap: null
+skipped: []

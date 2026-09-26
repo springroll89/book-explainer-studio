@@ -1,0 +1,14 @@
+draft_sha256: 填当前文件完整SHA256
+source_generation: 填当前原文版本
+dependency_hashes: {}
+reviewers:
+  fact: {status: pending, independent: true, report: review/fact_v1.yaml}
+  deai: {status: pending, independent: true, report: review/deai_v1.yaml}
+  listener: {status: pending, independent: true, report: review/listener_v1.yaml}
+core_takeaways:
+  - {id: K1, delivered: false, supported: false}
+findings: []
+listener:
+  engaged: []
+  dropoff: []
+  takeaway: 尚未审听

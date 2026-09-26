@@ -1,0 +1,110 @@
+format:
+  speech_rate_cpm: 240
+  episode_minutes: [10, 15]
+depth:
+  required_layers: [2]
+  series_layers: [3]
+  commentary_ratio: [0.05, 0.30]
+lint:
+  sentence_warn: 35
+  sentence_error: 55
+  clause_warn: 20
+  first_hook_sec: 30
+  hook_gap_sec: 90
+  hook_fulfil_min: 0.6
+quote:
+  max_ratio: 0.12
+  max_single_chars: 80
+review:
+  max_rounds: 3
+  max_p1: 3
+gates:
+  analysis: manual
+  plan: manual
+  first_episode: manual
+  final: manual
+
+# Compatibility for existing projects; `new` explicitly selects full_season_review.
+drafting:
+  mode: episode_review
+preview_limits:
+  max_draft_episodes_before_g2: 1
+  max_draft_episodes_before_g3: 2
+visual_pacing:
+  output: {aspect: "16:9", width: 1920, height: 1080}
+  safe_area: {top: 0.10, bottom: 0.18, left: 0.05, right: 0.05}
+  avg_hold_sec: [8, 12]
+  max_static_sec: 15
+  min_hold_sec: 8
+  fragment_run: {max_shots: 4, below_sec: 3}
+  opening: {window_sec: 30, min_hard_changes: 6}
+  segment_targets:
+    opening: {avg: [8, 10], max_static: 15}
+    setup: {avg: [8, 12], max_static: 15}
+    clue: {avg: [8, 10], max_static: 15}
+    reveal: {avg: [8, 10], max_static: 15}
+    emotion: {avg: [10, 15], max_static: 15}
+    info: {avg: [8, 12], max_static: 15}
+    recap: {avg: [8, 10], max_static: 15}
+    ending: {avg: [8, 12], max_static: 15}
+  kind_ratio: {character: 0.30, scene: 0.20, object: 0.20, ambience: 0.20, info: 0.10}
+  kind_ratio_tolerance: 0.15
+  reuse: {factor: [1.0, 1.0], max_per_asset: 1}
+  motion: {max_scale_change: 0.15, max_pan_ratio: 0.20, same_direction_run: 3}
+  crop: {min_crop_scale: 0.7}
+  overlay: {reading_cps: 4, extra_sec: 1, name_tag_min_sec: 2.5, info_max_chars: 40}
+  reveal_cut_tolerance_sec: 0.5
+
+# O13 声音设计与混音默认值。这里只定义规则与起始参考值，命令不会自行调用付费模型。
+sound_design:
+  narration:
+    model: seed-tts-2.0
+    voice: ""
+    speed: null
+    params: {}
+    generate_unit: paragraph
+    split_method: timestamps
+    sentence_pause_sec: [0.25, 0.6]
+    paragraph_pause_sec: [0.5, 0.9]
+  sfx:
+    model: seed-audio-1.0
+    format: {sample_rate: 48000, bit_depth: 24, container: wav}
+    ambience_loop_sec: [45, 60]
+    variants_default: 1
+    variants_important: 2
+    prompt_suffix: "无人声，无音乐"
+  pricing:
+    sfx_model_per_minute: 1.0
+    narration_model_per_minute: null
+    currency: CNY
+  budget_per_episode: 20
+  budget_per_13min:
+    cues_event_process: [10, 25]
+    max_event_process_per_min: 3
+    max_design_per_min: 2
+    gap_total_sec: [30, 60]
+  gap:
+    pre_pad_sec: [0.2, 0.4]
+    post_pad_sec: [0.3, 0.8]
+    max_single_sec: 3.0
+    overlap_tolerance_sec: 0.1
+  scene:
+    breath_sec: [1.0, 2.0]
+    lead_in_sec: [0.5, 1.0]
+    crossfade_sec: [0.5, 1.0]
+  levels_db:
+    ambience_under_voice: [-25, -15]
+    music_under_voice: [-20, -15]
+    process_under_voice: [-18, -12]
+    event_max_relative: 0
+  ducking:
+    attack_ms: [50, 100]
+    release_ms: [300, 500]
+  eq_carve:
+    band_hz: [1000, 4000]
+    cut_db: [2, 4]
+  key_info_guard_sec: 1.0
+  loudness:
+    integrated_lufs: [-16, -14]
+    true_peak_dbtp: -1.0
+  baseline: null
