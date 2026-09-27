@@ -64,3 +64,5 @@
 - L20260927-01：更新 `style/story_craft.md`；检查：`.venv/bin/python -m unittest tests.test_story_profile tests.test_lessons`。
 
 - L20260927-03：更新 `bookflow/__main__.py`；检查：`tests/test_lessons.py`。
+
+- L20260927-09：更新 `.agents/skills/produce-audio/SKILL.md`；检查：`tests/test_voice_stage.py`。
