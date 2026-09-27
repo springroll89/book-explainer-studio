@@ -97,42 +97,67 @@ def _usable(epdir: Path, parts_dir: Path, row: dict, *, text_sha: str, cast_sha:
 
 
 def plan(epdir: Path) -> dict:
-    """Return paragraph hashes and billable chars; never generate or mutate files."""
+    """Return synthesis units, hashes and billable chars; never generate or mutate files.
+
+    Narration-only books keep one unit per paragraph. Books whose cast lists
+    characters split each paragraph into narrator/character runs from
+    ``voice_script.yaml``; a unit's ``sentences`` are then sentence fragments.
+    """
     epdir = Path(epdir).resolve()
     final = epdir / "final.md"
-    cast = epdir.parent.parent / "production/voice_cast.yaml"
+    project = epdir.parent.parent
+    cast = project / "production/voice_cast.yaml"
     if not final.is_file() or not cast.is_file():
         raise ValueError("配音计划缺少定稿或项目音色表")
     from .adapters.ffmpeg_audio import script_rows
+    from . import voice_script
     stable = script_rows(final)
     parsed = parse_draft(final.read_text(encoding="utf-8"))
     config_sha = narration_digest(load_config(epdir))
-    cast_sha = sha256_file(cast)
     segments_path, parts_dir = cache_paths(epdir)
     cached = _cached_rows(epdir, segments_path)
-    groups: list[dict] = []
-    for line, text in parsed["lines"]:
-        if groups and line == groups[-1]["last_line"] + 1:
-            groups[-1]["last_line"] = line
-            groups[-1]["text"] += "\n" + text
-        else:
-            groups.append({"first_line": line, "last_line": line, "text": text})
-    if not groups:
+    cast_data = voice_script.load_cast(project)
+    narrator_voice, _ = voice_script.resolve(cast_data, voice_script.NARRATOR)
+    multi = voice_script.required(project)
+    if multi:
+        units = voice_script.episode_units(project, int(epdir.name[2:]), final, stable)
+        cast_sha = voice_script.voices_digest(units, cast_data)
+    else:
+        units = []
+        groups: list[dict] = []
+        for line, text in parsed["lines"]:
+            if groups and line == groups[-1]["last_line"] + 1:
+                groups[-1]["last_line"] = line
+                groups[-1]["text"] += "\n" + text
+            else:
+                groups.append({"first_line": line, "last_line": line, "text": text})
+        for group in groups:
+            units.append({"text": group["text"], "voice": narrator_voice, "speaker_key": voice_script.NARRATOR,
+                          "fragments": [{"id": row["id"], "text": row["text"]}
+                                        for row, parsed_row in zip(stable, parsed["sentences"])
+                                        if group["first_line"] <= parsed_row["line"] <= group["last_line"]]})
+        cast_sha = sha256_file(cast)
+    if not units:
         raise ValueError("定稿没有可配音的段落")
+    every_cached = [row for rows in cached.values() for row in rows if row]
     planned = []
-    for index, group in enumerate(groups, 1):
-        sentences = [{"id": row["id"], "text": row["text"]}
-                     for row, parsed_row in zip(stable, parsed["sentences"])
-                     if group["first_line"] <= parsed_row["line"] <= group["last_line"]]
+    for index, unit in enumerate(units, 1):
+        sentences = unit["fragments"]
         name = f"para-{index:04d}.mp3"
-        text_sha = hashlib.sha256(group["text"].encode("utf-8")).hexdigest()
-        prior = next((row for row in reversed(cached.get(index, []))
-                      if row and _usable(epdir, parts_dir, row, text_sha=text_sha, cast_sha=cast_sha,
-                                         config_sha=config_sha, sentences=sentences)), None)
+        text_sha = (voice_script.unit_sha(unit["text"], unit["voice"]) if multi
+                    else hashlib.sha256(unit["text"].encode("utf-8")).hexdigest())
+
+        def usable(row: dict) -> bool:
+            return _usable(epdir, parts_dir, row, text_sha=text_sha, cast_sha=cast_sha,
+                           config_sha=config_sha, sentences=sentences)
+        prior = next((row for row in reversed(cached.get(index, [])) if row and usable(row)), None)
+        if prior is None and multi:
+            prior = next((row for row in reversed(every_cached) if usable(row)), None)
         reused = prior is not None
-        planned.append({"index": index, "path": name, "text": group["text"],
-                        "text_sha256": text_sha, "sentences": sentences,
+        planned.append({"index": index, "path": name, "text": unit["text"], "speaker": unit["voice"],
+                        "speaker_key": unit["speaker_key"], "text_sha256": text_sha, "sentences": sentences,
                         "cached": reused, "cached_record": prior if reused else None})
     return {"paragraphs": planned, "cast_sha256": cast_sha, "config_sha256": config_sha,
+            "multi_voice": multi,
             "new_chars": sum(len(row["text"]) for row in planned if not row["cached"]),
             "reused_paragraphs": sum(row["cached"] for row in planned)}

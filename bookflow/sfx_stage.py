@@ -241,11 +241,19 @@ def bind_existing(epdir: Path) -> dict:
             "artifacts": [str(binding), str(manifest_path)]}
 
 
-def advance(project: Path, epdir: Path) -> dict:
-    """The public entry point enforces the real-book media gate before local binding."""
+def advance(project: Path, epdir: Path, *, allow_paid: bool = False, client=None) -> dict:
+    """Bind verified assets; with allow_paid, generate one missing effect per call."""
     project, epdir = Path(project).resolve(), Path(epdir).resolve()
     guard = guard_check(project, "media-generate", int(epdir.name[2:]))
     if not guard["passed"]:
         return {"status": "warning", "passed": False, "summary": "正式音效守卫未通过",
                 "errors": guard["errors"], "next_actions": ["先完成对应人工确认"], "artifacts": []}
-    return bind_existing(epdir)
+    result = bind_existing(epdir)
+    if result["passed"] or not result.get("missing_cues"):
+        return result
+    if not allow_paid:
+        result["next_actions"] = [*result.get("next_actions", []),
+                                  "无可复用素材的 cue 需付费生成：确认预算后加 --allow-paid（豆包音频 1.0）"]
+        return result
+    from .sfx_generate import generate_next
+    return generate_next(project, epdir, client=client)

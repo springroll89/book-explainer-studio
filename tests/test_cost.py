@@ -40,6 +40,11 @@ class CostTests(unittest.TestCase):
         write_yaml(path, data)
 
     def test_missing_price_blocks_real_preflight_without_mutating_media(self):
+        path = self.project / "project.yaml"
+        data = load_yaml(path)
+        data.setdefault("sound_design", {})["pricing"] = {"narration_model_per_10k_chars": None,
+                                                         "sfx_model_per_minute": None, "currency": "CNY"}
+        write_yaml(path, data)
         self._cue()
         before = sha256_file(self.epdir / "production/final.mp4")
         estimate = cost.estimate_episode(self.project, 1)

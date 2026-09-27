@@ -15,8 +15,8 @@ description: 在书籍精讲项目规划、生成或验收配音、音效、混�
 
 1. 稿件稳定后生成句子表并核对锚点。`./run.sh sound cues <集目录>` 只初始化/迁移清单，不会自动提取稿件中的 `[音效：…]` 标记；人工确认采用项并转录到 `production/sound_cues.yaml`。
 2. 运行 `sound check`、`sound estimate`。清单必须有稳定句子锚点、声源/用途、时长、停顿策略和状态；先检查开场限制、费用与阶段依赖。
-3. 豆包 2.0 的原调用规范与本地脚本已在首集跑通，沿用[声音制作参考](references/production-guide.md)，不另行改造调用协议。本仓库新流水线适配器尚未单独完成真实服务端/账单验收；这不表示原调用规范未跑通，也不是重写调用协议的理由。只有用户明确授权本次付费，且制作预检、费用上限和输入检查都通过时，才运行 `./run.sh produce <项目> epNN --until voice --allow-paid`；未知提交结果不得重发。
-4. 豆包音频 1.0 付费音效适配器尚未接入。不得调用旧生成脚本对外请求；只可绑定哈希有效、来源与费用已核实的本地素材或已试听接受的共享库素材，然后运行正式 `sfx` 阶段。
+3. 音色表 `production/voice_cast.yaml` 含人物时按多音色配音：旁白读引号外文字，每处“…”按本集 `production/voice_script.yaml` 由对应人物音色读（转述、强调用引号标 narrator）。全季定稿确认后先 `./run.sh voices scaffold <项目> --eps …` 生成待填清单、逐条填说话人，再 `voices check` 汇总缺标注、缺音色、可复用和未出场人物；新音色只在用户回复后用 `voices set` 写入。批量配音期间不改音色表。
+4. 豆包 2.0 配音沿用[声音制作参考](references/production-guide.md)的调用规范；豆包音频 1.0 音效已接入正式 `sfx` 阶段：cue 先用 `sfx search` 找库内候选，能复用就写 SFX ID；库里有候选却仍要新做时在 cue 写 `generate: true`。只有用户明确授权本次付费、预检与每集费用上限通过时，才运行 `./run.sh produce <项目> epNN --allow-paid`，每次只提交一条配音段落或一条音效；结果未知时锁定原请求，不得重发。样片或成片确认后运行 `sfx harvest <项目> --ep N` 把新生成音效收入共享库。
 5. 所需上游媒体均有效后运行 `./run.sh produce <项目> epNN --from mix --until subs`。最终时间表、字幕和画面都以当前混音为准；修改稿件或音频后重新对齐，不沿用旧时间轴。
 
 ## 验收与边界

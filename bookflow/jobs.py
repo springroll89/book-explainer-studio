@@ -619,6 +619,21 @@ def _voice_until_ready(project: Path, ep: int, *, timeout_sec: int = 5400) -> di
             "reason": "原豆包任务仍待查询或配音未完成；保留任务卡和请求日志，稍后继续"}
 
 
+def _sfx_until_ready(project: Path, ep: int, *, limit: int = 80) -> dict:
+    """Parent-only paid SFX: bind what exists, generate one missing cue at a time."""
+    from .sfx_stage import advance
+
+    epdir = project / "episodes" / f"ep{ep:02d}"
+    for _ in range(limit):
+        result = advance(project, epdir, allow_paid=True)
+        if result.get("passed") and result.get("progress") != "generated":
+            return {"passed": True}
+        if result.get("passed"):
+            continue
+        return {"passed": False, "needs_you": True, "reason": result.get("summary", "正式音效未完成")}
+    return {"passed": False, "needs_you": True, "reason": "本集音效生成次数达到单次上限；核对 cue 表后重跑"}
+
+
 def _run_real(project: Path, stage: str) -> dict:
     """One fresh, bounded Codex session per decision phase; parent verifies files."""
     from .approvals import confirmation_state
@@ -727,6 +742,11 @@ def _run_real_locked(project: Path, stage: str, confirmation_state, estimate_epi
                     current = _update_real_card(project, card["id"], session, status="needs_you", reason=reason)
                     return _report(reason, status="warning", cards=[current], completed=completed,
                                    budget=budget)
+            sfx_result = _sfx_until_ready(project, ep)
+            if not sfx_result["passed"]:
+                current = _update_real_card(project, card["id"], session,
+                                            status="needs_you", reason=sfx_result["reason"])
+                return _report(sfx_result["reason"], status="warning", cards=[current], completed=completed)
             _update_real_card(project, card["id"], session)
             before = _shared_hashes(project, card_path, card)
             execution = invoke_audio(project, ep, card_path)
