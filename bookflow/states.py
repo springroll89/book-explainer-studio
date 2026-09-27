@@ -20,8 +20,10 @@ def derive(project:Path)->dict:
     expected=[e['ep'] for e in planned if isinstance(e,dict) and type(e.get('ep')) is int]
     numbers=sorted(set(expected) | {int(e.name[2:]) for e in epdirs if e.name[2:].isdigit()})
     confirmations={'plan':confirmation_state(p,'plan')['state'],
+                   'style':confirmation_state(p,'style')['state'],
+                   'characters':confirmation_state(p,'characters')['state'],
                    'sample':confirmation_state(p,'sample',1)['state']}
-    for kind in ('script','release'):
+    for kind in ('script','sound','release'):
         confirmations[kind]={str(ep):confirmation_state(p,kind,ep)['state'] for ep in numbers}
     ledger_states={x['ep']:x['passed'] for x in ledger_check(p).get('episodes',[])}
     for epdir in epdirs:
@@ -76,7 +78,7 @@ def derive(project:Path)->dict:
         out['deferred_confirmations']={g:s for g,s in confirmations.items() if g!='plan'}
     else:
         if any(x.get('flags') for x in eps): out['awaiting_human'].append('处理需要复查或暂停的集数')
-        labels={'plan':'方案','script':'文案','sample':'样片','release':'成片'}
+        labels={'plan':'方案','script':'文案','style':'画风','characters':'定妆','sound':'声音','sample':'样片','release':'成片'}
         for kind,state in confirmations.items():
             scopes=state.items() if isinstance(state,dict) else [(None,state)]
             for ep,status in scopes:

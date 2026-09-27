@@ -146,9 +146,28 @@ def _exercise(root: Path, *, keep_artifacts: bool) -> dict:
     final_snapshot = recap.snapshot_final(project, 1)
     if (not final_snapshot["passed"] or not final_snapshot["review_carried"]
             or not recap.check(project, required_episodes=[1])["passed"]
-            or derive(project)["stage"] != "声音"):
+            or derive(project)["stage"] != "设计确认"):
         raise ValueError("相同纯口播的测试定稿未能保留有效前情快照")
     checks.append("recap_final_snapshot+identical_spoken_review")
+    from .media_fixture import _png
+    (project / "visual").mkdir(exist_ok=True)
+    for name in ("style_a.png", "P01.png"):
+        _png(project / "visual" / name)
+    write_yaml(project / approvals.STYLE_MANIFEST, {"test_fixture_only": True, "candidates": [
+        {"id": "A", "images": ["visual/style_a.png"], "note": "测试夹具画风"}]})
+    if derive(project)["needs_you"][-1:] != ["画风选择"]:
+        raise ValueError("画风候选未选定时应先请用户挑选")
+    write_yaml(project / approvals.STYLE_MANIFEST, {"test_fixture_only": True, "chosen": "A", "candidates": [
+        {"id": "A", "images": ["visual/style_a.png"], "note": "测试夹具画风"}]})
+    write_yaml(project / approvals.CHARACTER_MANIFEST, {"test_fixture_only": True, "characters": {
+        "P01": {"name": "测试人物", "images": ["visual/P01.png"], "version": 1}}})
+    for gate, quote in (("style", "拍板画风"), ("characters", "拍板定妆")):
+        if not approvals.record_confirmation(project, gate, quote, session="selftest-fixture",
+                                             verify_transcript=False)["passed"]:
+            raise ValueError(f"临时{quote}测试记录失败")
+    if derive(project)["stage"] != "声音":
+        raise ValueError("画风与定妆测试确认后未进入声音阶段")
+    checks.append("test_style+test_characters")
     write_yaml(project / "production/voice_cast.yaml", {"version": 1, "test_fixture_only": True,
                                                        "voices": {"narrator": "silent"}})
     checks.append("draft+lint+quotes+test_confirmation")
@@ -162,6 +181,19 @@ def _exercise(root: Path, *, keep_artifacts: bool) -> dict:
         raise ValueError(partial["summary"] + "：" + "；".join(partial.get("errors", [])))
     if partial["executed"] != list(produce.STAGES[:4]):
         raise ValueError("测试 produce --until mix 未按阶段生成静音声音资产")
+    audio = produce.run(project, "ep01", test_mode=True, until="subs")
+    if not audio["passed"]:
+        raise ValueError(audio["summary"] + "：" + "；".join(audio.get("errors", [])))
+    waiting = derive(project)
+    if waiting["stage"] != "声音" or "audition" not in waiting["next_step"]:
+        raise ValueError("首集声音完成后应先生成试听单，不得直接进入画面")
+    from .audition import build as build_audition
+    if not build_audition(project, 1)["passed"] or derive(project)["needs_you"][-1:] != ["声音确认：第 1 集"]:
+        raise ValueError("试听单生成后应请用户确认声音")
+    if not approvals.record_confirmation(project, "sound", "拍板声音", session="selftest-fixture",
+                                         verify_transcript=False)["passed"] or derive(project)["stage"] != "画面":
+        raise ValueError("临时声音测试确认后未进入画面阶段")
+    checks.append("audition_sheet+test_sound")
     media = produce.run(project, "ep01", test_mode=True, until="render")
     if not media["passed"]:
         raise ValueError(media["summary"] + "：" + "；".join(media.get("errors", [])))

@@ -112,9 +112,15 @@ def override(project: Path, rule: str, reason: str) -> dict:
     return {"passed":True,"path":str(path),"status":"preview_override"}
 
 
-# The four content approvals below replace the terminal gates for new projects.
-CONFIRMATIONS = {"方案": "plan", "文案": "script", "样片": "sample", "成片": "release"}
-_COMMAND = re.compile(r"^(拍板|撤回)(方案|文案|样片|成片)(?:,?除(第?[1-9][0-9]*集?(?:,第?[1-9][0-9]*集?)*))?$")
+# Passphrase confirmations replace the terminal gates for new projects.
+CONFIRMATIONS = {"方案": "plan", "文案": "script", "画风": "style", "定妆": "characters",
+                 "声音": "sound", "样片": "sample", "成片": "release"}
+PROJECT_GATES = ("plan", "style", "characters")
+_COMMAND = re.compile(r"^(拍板|撤回)(方案|文案|画风|定妆|声音|样片|成片)"
+                      r"(?:,?除(第?[1-9][0-9]*集?(?:,第?[1-9][0-9]*集?)*))?$")
+STYLE_MANIFEST = "visual/style_choice.yaml"
+CHARACTER_MANIFEST = "visual/character_sheet.yaml"
+_DEFAULT_SOUND = {"mix": "production/final_mix.wav", "timing": "production/timing_actual.json"}
 _DEFAULT_SAMPLE = {
     "mix": "production/final_mix.wav",
     "subtitles": "production/subtitles.srt",
@@ -129,7 +135,8 @@ def parse_confirmation(quote: str) -> dict:
     compact = re.sub(r"[\s。；;：:!！?？]", "", normalized.replace("，", ",").replace("、", ",")).replace("拍版", "拍板")
     match = _COMMAND.fullmatch(compact)
     if not match:
-        raise ValueError("只接受独立的“拍板方案/文案/样片/成片”或“撤回…”口令；附带修改意见时先处理修改")
+        raise ValueError("只接受独立的“拍板方案/文案/画风/定妆/声音/样片/成片”或“撤回…”口令；"
+                         "附带修改意见时先处理修改")
     action, label, excluded = match.groups()
     if excluded and action == "撤回":
         raise ValueError("撤回口令不使用“除”；请用 --eps 指定范围")
@@ -142,6 +149,19 @@ def _planned_episodes(project: Path) -> list[int]:
     plan = load_yaml(Path(project) / "plan/episodes.yaml", {}) or {}
     rows = plan if isinstance(plan, list) else plan.get("episodes", [])
     return sorted({row["ep"] for row in rows if isinstance(row, dict) and type(row.get("ep")) is int})
+
+
+def _sound_waiting(project: Path) -> list[int]:
+    """Episodes with a finished mix whose sound confirmation is not current."""
+    from .guard import sound_required
+    configured = sound_paths(project)
+    waiting = []
+    for ep in _planned_episodes(project):
+        if (Path(project) / f"episodes/ep{ep:02d}" / configured["mix"]).is_file() \
+                and sound_required(project, ep) \
+                and confirmation_state(project, "sound", ep)["state"] != "passed":
+            waiting.append(ep)
+    return waiting
 
 
 def _relative_asset(project: Path, path: str) -> Path:
@@ -169,6 +189,67 @@ def _spoken_change(before: str, after: str) -> str:
     return f"{len(changes)} 处；删 {removed} 字、增 {added} 字；首处「{old}」→「{new}」"
 
 
+def _image_list(value: object) -> list[str] | None:
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list) or not value or not all(isinstance(item, str) and item.strip() for item in value):
+        return None
+    return [item.strip() for item in value]
+
+
+def visual_manifest(project: Path, gate: str) -> dict:
+    """Read the style or character-sheet manifest and list the images it binds."""
+    name = STYLE_MANIFEST if gate == "style" else CHARACTER_MANIFEST
+    path = Path(project) / name
+    if not path.is_file():
+        return {"passed": False, "path": name, "images": [], "errors": [f"缺少确认交付物：{name}"]}
+    try:
+        data = load_yaml(path, {}) or {}
+    except (OSError, ValueError, yaml.YAMLError):
+        return {"passed": False, "path": name, "images": [], "errors": [f"{name} 无法解析"]}
+    errors: list[str] = []
+    images: list[str] = []
+    if not isinstance(data, dict):
+        return {"passed": False, "path": name, "images": [], "errors": [f"{name} 必须是映射"]}
+    if gate == "style":
+        candidates = data.get("candidates")
+        rows = {str(row.get("id")): row for row in candidates if isinstance(row, dict) and row.get("id")} \
+            if isinstance(candidates, list) else {}
+        chosen = data.get("chosen")
+        if not rows:
+            errors.append(f"{name} 需要 candidates 列表，每项有 id 和 images")
+        elif not isinstance(chosen, str) or chosen not in rows:
+            errors.append(f"{name} 的 chosen 须填写选中的候选 id（用户选定后再填）")
+        else:
+            listed = _image_list(rows[chosen].get("images"))
+            if listed is None:
+                errors.append(f"{name} 选中候选 {chosen} 没有 images")
+            else:
+                images = listed
+    else:
+        characters = data.get("characters")
+        if isinstance(characters, list):
+            characters = {str(row.get("id")): row for row in characters if isinstance(row, dict) and row.get("id")}
+        if not isinstance(characters, dict) or not characters:
+            errors.append(f"{name} 需要 characters，按稳定人物 ID 列出定妆图")
+        else:
+            for cid, row in characters.items():
+                listed = _image_list(row.get("images") if isinstance(row, dict) else None)
+                if listed is None:
+                    errors.append(f"{name} 人物 {cid} 没有定妆图 images")
+                else:
+                    images.extend(listed)
+    return {"passed": not errors, "path": name, "images": list(dict.fromkeys(images)), "errors": errors,
+            "data": data}
+
+
+def sound_paths(project: Path) -> dict:
+    settings = load_config(project).get("mix", {})
+    settings = settings if isinstance(settings, dict) else {}
+    return {"mix": str(settings.get("output") or _DEFAULT_SOUND["mix"]),
+            "timing": str(settings.get("timing_output") or _DEFAULT_SOUND["timing"])}
+
+
 def deliverables(project: Path, gate: str, episodes: list[int] | None = None) -> dict:
     """Hash only approved outputs, never review reports or history folders."""
     project = Path(project)
@@ -176,6 +257,20 @@ def deliverables(project: Path, gate: str, episodes: list[int] | None = None) ->
     if gate == "plan":
         paths = [(name, False) for name in (
             "analysis/book_brief.md", "analysis/characters.yaml", "plan/episodes.yaml")]
+    elif gate in ("style", "characters"):
+        manifest = visual_manifest(project, gate)
+        if not manifest["passed"]:
+            return {"passed": False, "files": {}, "errors": manifest["errors"]}
+        paths = [(manifest["path"], False), *[(image, False) for image in manifest["images"]]]
+    elif gate == "sound":
+        if not episodes:
+            return {"passed": False, "errors": ["请指定至少一集"]}
+        configured = sound_paths(project)
+        for ep in episodes:
+            if ep < 1:
+                return {"passed": False, "errors": ["集号必须为正整数"]}
+            prefix = f"episodes/ep{ep:02d}/"
+            paths += [(prefix + configured["mix"], False), (prefix + configured["timing"], False)]
     elif gate in ("script", "sample", "release"):
         if not episodes:
             return {"passed": False, "errors": ["请指定至少一集"]}
@@ -768,13 +863,24 @@ def record_confirmation(project: Path, gate: str, quote: str,
     if command["gate"] != gate:
         return {"passed": False, "errors": ["口令确认项与命令确认项不一致"]}
     configured = load_yaml(project / "project.yaml", {}) or {}
-    approved_eps = sorted(set(episodes or _planned_episodes(project))) if gate in ("script", "release") else ([1] if gate == "sample" else [])
+    if gate in ("script", "release"):
+        approved_eps = sorted(set(episodes or _planned_episodes(project)))
+    elif gate == "sound":
+        approved_eps = sorted(set(episodes or _sound_waiting(project)))
+    else:
+        approved_eps = [1] if gate == "sample" else []
     excluded = set(command["exclude"])
     if excluded - set(approved_eps):
         return {"passed": False, "errors": ["口令排除的集数不在本次范围内"]}
     approved_eps = [ep for ep in approved_eps if ep not in excluded]
-    if gate != "plan" and not approved_eps:
+    if gate not in PROJECT_GATES and not approved_eps:
         return {"passed": False, "errors": ["没有可确认的集数"]}
+    if gate == "sound" and command["action"] == "approve":
+        from .audition import sheet_state
+        stale = [ep for ep in approved_eps if sheet_state(project, ep)["state"] != "current"]
+        if stale:
+            return {"passed": False, "errors": [f"第 {ep} 集试听单缺失或落后于当前混音；先运行 audition 并试听"
+                                                for ep in stale]}
     warnings: list[str] = []
     if verify_transcript and configured.get("approvals", {}).get("verify_transcript", True):
         latest, warning = _session_user_message()
@@ -815,7 +921,7 @@ def confirmation_state(project: Path, gate: str, ep: int | None = None) -> dict:
     changed = []
     snapshots = last.get("spoken_snapshots") if isinstance(last.get("spoken_snapshots"), dict) else {}
     for name, digest in old.items():
-        if ep is not None and gate != "plan" and not name.startswith(f"episodes/ep{ep:02d}/") and name != "release/compliance.yaml":
+        if ep is not None and gate not in PROJECT_GATES and not name.startswith(f"episodes/ep{ep:02d}/") and name != "release/compliance.yaml":
             continue
         if current["files"].get(name) != digest:
             row = {"file": name, "reason": "missing" if name not in current["files"] else "content_changed",

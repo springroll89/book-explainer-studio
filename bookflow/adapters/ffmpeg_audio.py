@@ -392,7 +392,13 @@ def mix(epdir: Path, *, replace_owned: bool = False) -> dict:
                        "audio_sha256": sha256_file(rendered), "duration_sec": probe["duration_sec"],
                        "inserted_gaps": [{"cue_id": item["cue_id"], "at": item["at"],
                                           "output_at": item["output_at"], "duration_sec": item["total"]}
-                                         for item in plan["insertions"]]}
+                                         for item in plan["insertions"]],
+                       # Audition sheets read this list, so it stays bound to the mix hash.
+                       "cue_timeline": [{"cue_id": effect["cue_id"], "start_sec": round(effect["start"], 3),
+                                         "end_sec": round(effect["start"] + effect["duration"], 3),
+                                         "policy": effect["policy"], "sentence_id": effect["sentence_id"],
+                                         "placement": effect["placement"], "asset_scope": effect["scope"]}
+                                        for effect in sorted(plan["effects"], key=lambda item: item["start"])]}
         staged_timing = workspace / "timing_actual.json"
         write_json(staged_timing, timing_data)
         if any(sha256_file(path) != digest for _, path, digest in sources):

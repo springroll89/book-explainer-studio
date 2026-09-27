@@ -34,8 +34,8 @@ class StatusConfirmationTests(unittest.TestCase):
             self.confirm(kind, "拍板" + label)
         result = derive(self.project)
         self.assertEqual(result["confirmations"], {
-            "plan": "passed", "sample": "passed",
-            "script": {"1": "passed", "2": "pending"},
+            "plan": "passed", "style": "pending", "characters": "pending", "sample": "passed",
+            "script": {"1": "passed", "2": "pending"}, "sound": {"1": "pending", "2": "pending"},
             "release": {"1": "passed", "2": "pending"}})
         self.assertEqual(result["episodes"][0]["status"], "approved")
         self.assertIn("待文案确认：第 2 集", result["awaiting_human"])

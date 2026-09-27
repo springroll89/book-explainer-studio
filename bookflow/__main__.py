@@ -118,9 +118,10 @@ def parser() -> argparse.ArgumentParser:
     guard.add_argument("project", type=Path)
     guard.add_argument("action")
     guard.add_argument("--ep", type=int)
-    approve = sub.add_parser("approve", help="记录用户在聊天中发出的四类确认或撤回口令")
+    approve = sub.add_parser("approve", help="记录用户在聊天中发出的确认或撤回口令")
     approve.add_argument("project", type=Path)
-    approve.add_argument("gate", choices=["方案", "文案", "样片", "成片", "plan", "script", "sample", "release"])
+    approve.add_argument("gate", choices=["方案", "文案", "画风", "定妆", "声音", "样片", "成片", "plan", "script",
+                                          "style", "characters", "sound", "sample", "release"])
     approve.add_argument("--eps", help="集号或范围，如 1-16、1,3,5")
     approve.add_argument("--quote", required=True, help="用户最近一条确认口令的原话")
     approve.add_argument("--session", choices=["Codex", "Claude Code"], default="Codex")
@@ -145,6 +146,12 @@ def parser() -> argparse.ArgumentParser:
     voices_set.add_argument("--voice-id")
     voices_set.add_argument("--pool", help="改用已确认的共用音色池")
     voices_set.add_argument("--name")
+    voices_sheet = voices_actions.add_parser("sheet", help="生成选音色单：人物资料、出场、台词量、代表台词、当前音色与同场易混")
+    voices_sheet.add_argument("project", type=Path)
+    voices_sheet.add_argument("--eps", help="默认全部计划集数")
+    audition = sub.add_parser("audition", help="为一集混音生成试听单：音效时间线与对白时段")
+    audition.add_argument("project", type=Path)
+    audition.add_argument("ep", help="集号，如 2 或 ep02")
     dev = sub.add_parser("dev", help="迁移与排查用内部命令")
     dev_commands = dev.add_subparsers(dest="dev_command", required=True)
     migrate_approvals = dev_commands.add_parser("migrate-approvals", help="迁移旧批准并保留原始记录")
@@ -389,13 +396,13 @@ def dispatch(args) -> dict | str:
             return lessons.report(args.project)
         return lessons.inbox(args.project) if args.action == "inbox" else lessons.triage(args.project)
     if cmd == "next":
-        from .flow import derive, write
+        from .flow import STAGES, derive, write
         state = derive(args.project) if args.read_only else write(args.project)
         if args.read_only:
             state["artifacts"] = []
         if args.json:
             return state
-        return (f"《{state['book']}》当前阶段：{state['stage']}（{state['stage_index']}/15）\n"
+        return (f"《{state['book']}》当前阶段：{state['stage']}（{state['stage_index']}/{len(STAGES)}）\n"
                 f"下一步：{state['next_step']}（{state['actor']}）\n"
                 f"需要你：{'；'.join(state['needs_you']) if state['needs_you'] else '无'}\n"
                 f"改动待过目：{'；'.join(state['change_pending']) if state['change_pending'] else '无'}\n"
@@ -422,7 +429,15 @@ def dispatch(args) -> dict | str:
             from .flow import _planned, _legacy_episodes
             episodes = _episode_list(args.eps) if args.eps else _planned(Path(args.project).resolve())
             return voice_script.season(args.project, episodes, skip=_legacy_episodes(Path(args.project).resolve(), episodes))
+        if args.action == "sheet":
+            from .flow import _planned, _legacy_episodes
+            episodes = _episode_list(args.eps) if args.eps else _planned(Path(args.project).resolve())
+            return voice_script.casting_sheet(args.project, episodes,
+                                              skip=_legacy_episodes(Path(args.project).resolve(), episodes))
         return voice_script.set_voice(args.project, args.speaker, voice_id=args.voice_id, pool=args.pool, name=args.name)
+    if cmd == "audition":
+        from .audition import build as build_audition
+        return build_audition(args.project, int(str(args.ep).lower().removeprefix("ep")))
     if cmd == "final":
         from .finalize import freeze_many
         return freeze_many(args.project, _episode_list(args.eps), source=args.source, replace=args.replace)
@@ -622,7 +637,7 @@ def main() -> int:
     try:
         result = dispatch(args)
         if (isinstance(result, dict) and (result.get("errors") or result.get("passed") is False)
-                and not (args.command == "voices" and args.action == "check"
+                and not (args.command == "voices" and args.action in ("check", "sheet")
                          and result.get("status") == "warning")):
             lesson = _record_cli_failure(args, "；".join(map(str, result.get("errors") or [result.get("summary", "命令失败")])))
             if lesson is not None:

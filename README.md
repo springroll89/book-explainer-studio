@@ -14,7 +14,7 @@
 
 ## 人工改稿
 
-新建书目默认全季初稿后统一人工改稿（`drafting.mode: full_season_review`），现有书目按用户要求启用。以 `next` 推进四项确认，不要求先改第一集才写后续；计划、来源和实际前情仍检查，文字授权不包含媒体及正式交付。
+新建书目默认全季初稿后统一人工改稿（`drafting.mode: full_season_review`），现有书目按用户要求启用。以 `next` 推进各项确认，不要求先改第一集才写后续；计划、来源和实际前情仍检查，文字授权不包含媒体及正式交付。
 新建剧情项目默认 `profile: story`：核心收获与 `[钩子]` 不再是硬性要求，文字审校仍须有独立事实报告；新建非虚构项目默认 `profile: explainer`，保留精讲检查。旧项目不自动改档位。场景对白还原用中文双引号，所在段须标原文依据；逐字原文引用仍按 `〔引 p…〕「…」` 核对。
 
 人工修改默认使用 Markdown：直接修改 `.md` 后发回即可。系统保留原稿，逐处对比改前改后，再由助手提炼有证据的风格规则；Word / WPS 仍兼容，但不再作为默认格式。详见[改稿导入与反馈流程](.agents/skills/import-feedback/SKILL.md)。
@@ -62,8 +62,9 @@
 1. `./run.sh dev migrate-approvals <项目>`：旧方案批准有效时迁为方案确认；已有新口令记录的范围不覆盖。
 2. `./run.sh final freeze <项目> --eps 2-16`：把用户认可的版本冻结为 final.md（默认各集最新草稿，已一致的集不改动）。随后请用户读完回复「拍板文案」。
 3. `./run.sh adopt-legacy <项目> --ep 1 --mix … --subtitles … --storyboard … --video … --note "…"`：收编旧流程已做完的成品，`next` 不再要求重做；请用户看完回复「拍板样片」。
-4. 音色表含人物时：`voices scaffold` → 逐条标说话人 → `voices check` 汇总全季缺口 → 用户定音色后 `voices set`。
-5. 之后每两集新建一个制作对话（末批不足两集则处理剩余集数），在同一对话内完成本批配音、音效、分镜、图片与视频合成；费用预估与用户授权通过后才使用 `produce … --allow-paid`，本地渲染由 `produce` 核验。
+4. 音色表含人物时：`voices scaffold` → 逐条标说话人 → `voices check` 汇总全季缺口。
+5. 画风与定妆：登记 `visual/style_choice.yaml`、`visual/character_sheet.yaml`，请用户分别回复「拍板画风」「拍板定妆」；再用 `voices sheet` 生成选音色单，用户定音色后 `voices set`。
+6. 之后每两集新建一个制作对话（末批不足两集则处理剩余集数）：两集声音先完成，`audition <项目> N` 生成试听单，用户回复「拍板声音」后再做分镜、图片与视频合成；费用预估与用户授权通过后才使用 `produce … --allow-paid`，本地渲染由 `produce` 核验。
 
 ## 本地运行
 
