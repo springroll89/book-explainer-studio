@@ -610,6 +610,48 @@ def check(project: Path, *, required_episodes: list[int] | None = None) -> dict:
             "summary": "前情表版本与复核记录通过；叙事语义仍需人工判断" if not errors else "前情表待补或复核失效"}
 
 
+def drafting_state(project: Path, ep: int | None = None) -> dict:
+    """Allow-missing view for parallel first drafts, mirroring the old continuity gate.
+
+    A selected (or working) candidate whose draft no longer matches blocks drafting;
+    missing prior entries and changed dependencies are only warnings, because the
+    season review (``check``) must settle them before the unified edit.
+    """
+    project = Path(project).resolve()
+    if ep is not None and (type(ep) is not int or ep < 1):
+        return {"passed": False, "errors": ["集号必须为正整数"], "warnings": [], "complete": False,
+                "missing_episodes": [], "pending_dependencies": [], "source": "recap"}
+    data = _read(project)
+    selected = {row["ep"]: row.get("selected_basis") for row in data["episodes"]
+                if isinstance(row, dict) and type(row.get("ep")) is int}
+    fingerprints = {row["ep"]: row["candidates"] for row in inspect(project)["episodes"]}
+    wanted = list(range(1, ep)) if ep is not None else sorted(fingerprints)
+    errors: list[str] = []
+    missing: list[int] = []
+    pending: list[int] = []
+    for number in wanted:
+        candidates = fingerprints.get(number, {})
+        basis = selected.get(number)
+        if basis not in candidates:
+            basis = "working" if "working" in candidates else None
+        if basis is None:
+            missing.append(number)
+            continue
+        if not candidates[basis]["file_current"]:
+            errors.append(f"第 {number} 集前情候选（{basis}）对应的稿件已变化；先更新 recap 前情表")
+        elif not candidates[basis]["dependencies_current"]:
+            pending.append(number)
+    warnings = []
+    if missing:
+        warnings.append(f"第 {'、'.join(map(str, missing))} 集前情待补：并行初稿暂用计划限制信息揭示，"
+                        "整季汇总前必须按实际稿件补录并复核。")
+    if pending:
+        warnings.append(f"第 {'、'.join(map(str, pending))} 集前情的前序依赖已变化，汇总前需重新核对。")
+    return {"passed": not errors, "errors": errors, "warnings": warnings,
+            "complete": not errors and not missing and not pending,
+            "missing_episodes": missing, "pending_dependencies": pending, "source": "recap"}
+
+
 def final_snapshot_state(project: Path, required_episodes: list[int]) -> dict:
     """Require selected, current final snapshots before any confirmed-script production."""
     project = Path(project).resolve()

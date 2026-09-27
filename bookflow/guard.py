@@ -7,6 +7,7 @@ command instead of silently reading them.
 """
 from __future__ import annotations
 from pathlib import Path
+import yaml
 from .approvals import confirmation_state
 from .common import full_season_review, load_yaml
 
@@ -74,7 +75,6 @@ def check(project: Path, action: str, ep: int | None = None) -> dict:
                   if state not in ('passed', 'error'))
     if batch:
         from .planning import check_plan
-        from .continuity import context, check as continuity_check
         try:
             plan = check_plan(p)
             errors.extend(plan.get('errors', [])); warnings.extend(plan.get('warnings', []))
@@ -83,10 +83,18 @@ def check(project: Path, action: str, ep: int | None = None) -> dict:
             episodes = data if isinstance(data, list) else data.get('episodes', [])
             if ep is not None and (type(ep) is not int or ep < 1 or ep not in [e.get('ep') for e in episodes if isinstance(e, dict)]):
                 errors.append('集号不在当前分集计划中')
-            continuity = context(p, ep, allow_missing=True) if ep is not None else continuity_check(p)
+            recap_path = p / 'episodes/recap.yaml'
+            if recap_path.exists() or recap_path.is_symlink():
+                # recap.yaml supersedes working_continuity.yaml; a legacy file kept by
+                # migration must not block drafting once the recap exists.
+                from .recap import drafting_state
+                continuity = drafting_state(p, ep)
+            else:
+                from .continuity import context, check as continuity_check
+                continuity = context(p, ep, allow_missing=True) if ep is not None else continuity_check(p)
             errors.extend(continuity.get('errors', [])); warnings.extend(continuity.get('warnings', []))
             checks['continuity'] = continuity
-        except (OSError, ValueError, KeyError, TypeError) as exc:
+        except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
             errors.append(f'来源、计划或工作连续性检查未完成：{exc}')
         warnings.append('全季统一改稿模式：本次仅放行文字草稿与审阅，文案确认状态保持原样。')
     return {'passed': not errors, 'action': action, 'ep': ep, 'required_confirmations': required,

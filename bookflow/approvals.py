@@ -885,41 +885,56 @@ def confirmation_state(project: Path, gate: str, ep: int | None = None) -> dict:
 
 
 def migrate_legacy(project: Path) -> dict:
-    """Carry valid old G1+G2 into the plan approval and retain all old records."""
+    """Carry valid old G1+G2 into the plan approval and retain all old records.
+
+    A scope that already has any passphrase record (approve, revoke or carry) is
+    never migrated: the newer record wins, including a revoke or an approval that
+    has since become invalid.
+    """
     project = Path(project)
     # log.yaml holds the new passphrase confirmations and must stay in place.
     records = [path for path in (project / "approvals").glob("*.yaml") if path.name != "log.yaml"]
     if not records:
         return {"passed": True, "migrated": [], "warnings": ["没有旧版批准记录"]}
+    legacy = project / "approvals/legacy"
+    collisions = [str(legacy / path.name) for path in records if (legacy / path.name).exists()]
+    if collisions:
+        return {"passed": False, "errors": [f"旧批准目标文件已存在：{collisions[0]}"]}
+    rows = read_log(project)
+
+    def has_new_record(gate: str, ep: int | None = None) -> bool:
+        return any(row.get("gate") == gate and (ep is None or ep in (row.get("episodes") or []))
+                   for row in rows)
+
     migrated: list[str] = []
     warnings: list[str] = []
-    if gate_state(project, "G1") == "passed" and gate_state(project, "G2") == "passed":
-        if confirmation_state(project, "plan")["state"] != "passed":
-            assets = deliverables(project, "plan")
-            if not assets["passed"]:
-                return {"passed": False, "errors": assets["errors"]}
-            _append_log(project, {"gate": "plan", "episodes": [], "action": "approve",
-                                  "quote": "由旧版终端确认迁移", "at": datetime.now(timezone.utc).isoformat(),
-                                  "session": "legacy_migration", "deliverables": assets["files"],
-                                  "reason": "G1 和 G2 的最新旧版批准均有效"})
-            migrated.append("plan")
+    if has_new_record("plan"):
+        warnings.append("已有新口令方案记录（含撤回或失效），不用旧版 G1/G2 覆盖")
+    elif gate_state(project, "G1") == "passed" and gate_state(project, "G2") == "passed":
+        assets = deliverables(project, "plan")
+        if not assets["passed"]:
+            return {"passed": False, "errors": assets["errors"]}
+        _append_log(project, {"gate": "plan", "episodes": [], "action": "approve",
+                              "quote": "由旧版终端确认迁移", "at": datetime.now(timezone.utc).isoformat(),
+                              "session": "legacy_migration", "deliverables": assets["files"],
+                              "reason": "G1 和 G2 的最新旧版批准均有效"})
+        migrated.append("plan")
     else:
         warnings.append("旧版 G1/G2 未同时有效，方案确认保持待确认")
-    if gate_state(project, "AV1", 1) == "passed":
+    if has_new_record("sample", 1):
+        if gate_state(project, "AV1", 1) == "passed":
+            warnings.append("已有新口令样片记录（含撤回或失效），不用旧版 AV1 覆盖")
+    elif gate_state(project, "AV1", 1) == "passed":
         assets = deliverables(project, "sample", [1])
-        if assets["passed"] and confirmation_state(project, "sample", 1)["state"] != "passed":
+        if assets["passed"]:
             _append_log(project, {"gate": "sample", "episodes": [1], "action": "approve",
                                   "quote": "由旧版终端确认迁移", "at": datetime.now(timezone.utc).isoformat(),
                                   "session": "legacy_migration", "deliverables": assets["files"],
                                   "reason": "第 1 集旧版 AV1 与当前样片交付物均有效"})
             migrated.append("sample")
-        elif not assets["passed"]:
+        else:
             warnings.append("旧版 AV1 有效，但新样片交付物不齐：" + "；".join(assets["errors"]))
-    legacy = project / "approvals/legacy"
     legacy.mkdir(parents=True, exist_ok=True)
     for path in records:
-        target = legacy / path.name
-        if target.exists():
-            return {"passed": False, "errors": [f"旧批准目标文件已存在：{target}"]}
-        path.rename(target)
+        path.rename(legacy / path.name)
     return {"passed": True, "migrated": migrated, "legacy_records": len(records), "warnings": warnings}

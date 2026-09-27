@@ -196,6 +196,38 @@ class RecapMigrationTests(unittest.TestCase):
         stale = evaluate(self.project, 2, second, report)
         self.assertIn("失效", "；".join(stale["errors"]))
 
+    def test_draft_guard_prefers_recap_over_stale_legacy_continuity(self):
+        from unittest.mock import patch
+        from bookflow.guard import check as guard_check
+        config = load_yaml(self.project / "project.yaml")
+        config["drafting"] = {"mode": "full_season_review"}
+        write_yaml(self.project / "project.yaml", config)
+        self.reviewed_working_recap()
+        # After migration the author keeps working in recap only: ep1 gets v2 there,
+        # while the retained working_continuity.yaml still points at v1.
+        second = self.project / "episodes/ep01/draft_v2.md"
+        atomic_write(second, "---\nepisode: 1\n---\n门又关了。")
+        update_working(self.project, 1, second, self.actual("门又关了"))
+        self.assertTrue(self.working.is_file())
+        with patch("bookflow.planning.check_plan", return_value={"errors": [], "warnings": []}), \
+             patch("bookflow.guard.confirmation_state", return_value={"state": "passed"}):
+            allowed = guard_check(self.project, "draft", 2)
+            self.assertTrue(allowed["passed"], allowed)
+            self.assertEqual(allowed["checks"]["continuity"]["source"], "recap")
+            # The recap's own candidate still blocks once its draft changes underneath it.
+            atomic_write(second, second.read_text(encoding="utf-8") + "\n新句。")
+            blocked = guard_check(self.project, "draft", 2)
+            self.assertFalse(blocked["passed"])
+            self.assertIn("前情候选", "；".join(blocked["errors"]))
+        # Missing prior entries stay warnings for parallel first drafts.
+        write_yaml(self.project / "plan/episodes.yaml", {"episodes": [{"ep": 1}, {"ep": 2}, {"ep": 3}]})
+        atomic_write(second, "---\nepisode: 1\n---\n门又关了。")
+        with patch("bookflow.planning.check_plan", return_value={"errors": [], "warnings": []}), \
+             patch("bookflow.guard.confirmation_state", return_value={"state": "passed"}):
+            parallel = guard_check(self.project, "draft", 3)
+        self.assertTrue(parallel["passed"], parallel)
+        self.assertEqual(parallel["checks"]["continuity"]["missing_episodes"], [2])
+
     def test_review_becomes_stale_after_draft_or_entry_change(self):
         recap = self.reviewed_working_recap()
         draft = self.project / "episodes/ep01/draft_v1.md"
