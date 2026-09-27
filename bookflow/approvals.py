@@ -8,6 +8,7 @@ import math
 import os
 import re
 import sys
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 import yaml
@@ -123,7 +124,9 @@ _DEFAULT_SAMPLE = {
 
 
 def parse_confirmation(quote: str) -> dict:
-    compact = re.sub(r"[\s。；：:!！?？]", "", quote.replace("，", ",").replace("、", ",")).replace("拍版", "拍板")
+    # NFKC folds full-width digits and punctuation from Chinese IMEs (５ → 5, ， → ,).
+    normalized = unicodedata.normalize("NFKC", quote)
+    compact = re.sub(r"[\s。；;：:!！?？]", "", normalized.replace("，", ",").replace("、", ",")).replace("拍版", "拍板")
     match = _COMMAND.fullmatch(compact)
     if not match:
         raise ValueError("只接受独立的“拍板方案/文案/样片/成片”或“撤回…”口令；附带修改意见时先处理修改")
@@ -846,6 +849,7 @@ def confirmation_state(project: Path, gate: str, ep: int | None = None) -> dict:
                             else "approvals/log.yaml",
                             "reason": "carry_evidence_invalid", "detail": "人工改稿沿用依据已失效"})
     change_pending = []
+    change_pending_items = []
     minor_files = set()
     if gate == "script":
         assistant_dir = Path(project).resolve() / "feedback/assistant_changes"
@@ -865,22 +869,26 @@ def confirmation_state(project: Path, gate: str, ep: int | None = None) -> dict:
                     path, basis = candidates[0]
                     report = json.loads(path.read_text(encoding="utf-8"))
                     minor_files.add(item["file"])
-                    change_pending.append(
-                        f"第{episode}集改动待过目：{_spoken_change(report['before_spoken'], report['after_spoken'])}；"
-                        f"风险核查：{report['risk_review']['note']}（{basis['change_ratio']:.1%}）")
+                    text = (f"第{episode}集改动待过目：{_spoken_change(report['before_spoken'], report['after_spoken'])}；"
+                            f"风险核查：{report['risk_review']['note']}（{basis['change_ratio']:.1%}）")
+                    change_pending.append(text)
+                    change_pending_items.append({"episode": episode, "created_at": str(report.get("created_at", "")),
+                                                 "text": text})
     # Keep all changed hashes visible to downstream media invalidation. Only
     # evidenced minor edits are exempt from a new human script confirmation.
     blocking_changes = [item for item in changed if not (
         item["reason"] == "content_changed" and item["file"] in minor_files)]
     return {"state": "invalidated" if blocking_changes or not current["passed"] else "passed",
             "changed_files": changed, "change_pending": change_pending,
+            "change_pending_items": change_pending_items,
             "at": last.get("at"), "quote": last.get("quote")}
 
 
 def migrate_legacy(project: Path) -> dict:
     """Carry valid old G1+G2 into the plan approval and retain all old records."""
     project = Path(project)
-    records = list((project / "approvals").glob("*.yaml"))
+    # log.yaml holds the new passphrase confirmations and must stay in place.
+    records = [path for path in (project / "approvals").glob("*.yaml") if path.name != "log.yaml"]
     if not records:
         return {"passed": True, "migrated": [], "warnings": ["没有旧版批准记录"]}
     migrated: list[str] = []

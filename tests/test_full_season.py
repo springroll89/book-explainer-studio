@@ -31,7 +31,8 @@ class FullSeasonTests(unittest.TestCase):
              'reveal': [], 'withhold': [], 'recap': '前面的疑问', 'cliffhanger': '门为何打开？'}
             for ep in range(1, 4)]}
         write_yaml(self.project / 'plan/episodes.yaml', self.plan)
-        self.gates = patch('bookflow.guard.gate_state', side_effect=lambda p, g, ep=None: 'passed' if g == 'G1' else 'invalidated')
+        self.gates = patch('bookflow.guard.confirmation_state',
+                           side_effect=lambda p, g, ep=None: {'state': 'passed' if g == 'plan' else 'invalidated'})
         self.gates.start()
         self.addCleanup(self.gates.stop)
 
@@ -63,13 +64,13 @@ class FullSeasonTests(unittest.TestCase):
             with self.subTest(action=action):
                 result = check(self.project, action, 3)
                 self.assertTrue(result['passed'], result)
-                self.assertEqual(result['required_gates'], ['G1'])
+                self.assertEqual(result['required_confirmations'], ['方案'])
                 self.assertFalse(result['checks']['continuity']['complete'])
                 self.assertEqual(result['checks']['continuity']['missing_episodes'], [1, 2])
         self.assertFalse(context(self.project, 3)['passed'])
 
     def test_g1_and_media_gates_are_not_waived(self):
-        with patch('bookflow.guard.gate_state', return_value='pending'):
+        with patch('bookflow.guard.confirmation_state', return_value={'state': 'pending'}):
             self.assertFalse(check(self.project, 'draft', 3)['passed'])
         for action in ('sound-plan', 'visual', 'media-generate', 'export-preview', 'export-deliver'):
             self.assertFalse(check(self.project, action, 3)['passed'], action)
@@ -93,11 +94,11 @@ class FullSeasonTests(unittest.TestCase):
         self.draft(1, 2)
         self.assertFalse(check(self.project, 'draft', 3)['passed'])
 
-    def test_legacy_project_keeps_sequential_gates(self):
+    def test_episode_mode_later_drafts_follow_first_script_confirmation(self):
         write_yaml(self.project / 'project.yaml', {})
         result = check(self.project, 'draft', 3)
         self.assertFalse(result['passed'])
-        self.assertEqual(result['required_gates'], ['G1', 'G2', 'G3'])
+        self.assertEqual(result['required_confirmations'], ['方案', '文案 第1集'])
 
     def test_restamping_prior_working_draft_does_not_clear_later_dependency(self):
         first = self.draft(1)

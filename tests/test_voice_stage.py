@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from bookflow.common import load_yaml, sha256_file, write_json, write_yaml
+from bookflow.approvals import record_confirmation
 from bookflow.guard import check as guard_check
 from bookflow.produce import check, run
 from bookflow.selftest import run as selftest_run
@@ -80,6 +81,8 @@ class VoiceStageTests(unittest.TestCase):
         self.fake = FakeDoubao(self.paragraphs, audio.read_bytes())
 
     def test_guard_and_explicit_paid_switch(self):
+        self.assertTrue(record_confirmation(self.project, "plan", "撤回方案",
+                                            verify_transcript=False)["passed"])
         guard = guard_check(self.project, "media-generate", 1)
         self.assertFalse(guard["passed"], guard)
         with patch("bookflow.voice_stage.DoubaoVoiceClient", return_value=self.fake):
