@@ -5,13 +5,13 @@ description: 在本书籍精讲项目检查一集稿件的事实、核心收获�
 
 # review-episode
 
-先运行 `./run.sh guard <项目路径> review --ep <集号>`。全季统一改稿模式允许 G2/G3/G4 未批准时完成文字自查和独立审校，不等待逐集人工反馈。草稿报告的 `dependency_hashes` 绑定有效工作连续性中的实际稿件哈希；`final.md` 和 `status: final` 审校仍要求正式前序定稿依赖。前集未齐时如实标记依赖待补，整季初稿交齐前补录并复核。下一步为用户统一修改全部文案。
+先运行 `./run.sh next <项目路径>`。已授权全季初稿时，不等待逐集人工反馈才做文字检查。报告的 `dependency_hashes` 绑定已复核前情的实际稿件哈希；定稿报告绑定前序定稿。前集未齐时标记待补，交齐全季前逐集复核 `episodes/recap.yaml`。
 
-读取 [独立审校与通过条件](../../../docs/WORKFLOW.md#独立审校与通过条件)。先运行 `lint`、`quotes`、`check-plan`，随后独立分发给 [fact-checker](../../../roles/fact-checker.md)、[deai-editor](../../../roles/deai-editor.md) 与 [listener](../../../roles/listener.md)。
+读取 [独立审校与通过条件](../../../docs/WORKFLOW.md#独立审校与通过条件)。先运行 `lint`、`quotes`、`check-plan`，随后由 [fact-checker](../../../roles/fact-checker.md) 核对原文事实和身份。口语、去 AI 腔并入写稿自查；两个档位默认都不单设听感与去 AI 腔审校，需用户要求或显式设置 `review.listener_enabled` / `review.deai_enabled` 才启用。
 
-剧情类的统筹、fact-checker 和 deai-editor 按 [剧情文字总纲](../../../style/narrative_charter.md) 检查场景中的理解、冲突推进和信息揭示；不要因缺少总结性道理判深度不足，也不要为补 takeaways 打断剧情。listener 不接收该总纲或本书写法，继续保持下述隔离。
+剧情类按 [剧情文字总纲](../../../style/narrative_charter.md) 与 [共享写法](../../../style/story_craft.md) 核对场景和信息揭示，不因缺少总结性道理判深度不足。精讲档位仍须核对核心收获的实际交付。
 
-listener 只给 `audience` 和 `listener-input` 导出的句子 ID 纯口播；必须使用未继承写稿历史的独立上下文。没有这种能力时标 partial，不能在同一上下文假装盲审。
+确实启用 [listener](../../../roles/listener.md) 时，只给受众信息和 `listener-input` 导出的句子 ID 纯口播，使用未继承写稿历史的上下文；做不到则如实标 partial。已提交的可选报告同样检查哈希、内容与独立性，不能因默认关闭而忽略其中问题。文字检查不能代替样片实际试听。
 
 收齐原始报告后才汇总，绑定本轮稿件、原文批次与前序依赖指纹。以句子 ID 和触发原句核对钩子；以实际口播核对每条 takeaway。核心收获缺失 / 错误 / 无依据必须阻断，不能用 P1 数量豁免。
 

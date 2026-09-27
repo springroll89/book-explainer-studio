@@ -14,14 +14,14 @@
 
 ## 人工改稿
 
-新建书目默认先输出全部集数文案，再统一人工改稿（`drafting.mode: full_season_review`）。现有书目按用户要求启用；文字阶段不再被 G2/G3/G4 或两集预览上限中断。机器计划、原文依据和全季工作连续性仍检查，媒体及正式交付仍保留人工闸门。
+新建书目默认全季初稿后统一人工改稿（`drafting.mode: full_season_review`），现有书目按用户要求启用。以 `next` 推进四项确认，不要求先改第一集才写后续；计划、来源和实际前情仍检查，文字授权不包含媒体及正式交付。
 新建剧情项目默认 `profile: story`：核心收获与 `[钩子]` 不再是硬性要求，文字审校仍须有独立事实报告；新建非虚构项目默认 `profile: explainer`，保留精讲检查。旧项目不自动改档位。场景对白还原用中文双引号，所在段须标原文依据；逐字原文引用仍按 `〔引 p…〕「…」` 核对。
 
 人工修改默认使用 Markdown：直接修改 `.md` 后发回即可。系统保留原稿，逐处对比改前改后，再由助手提炼有证据的风格规则；Word / WPS 仍兼容，但不再作为默认格式。详见[改稿导入与反馈流程](.agents/skills/import-feedback/SKILL.md)。
 
 用户在聊天里明确给出改前、改后文字时，助手完成修改后登记原话和精确替换：`./run.sh edit instruction projects/my-book 3 --quote '把“旧地名”改为“新地名”' --replace '旧地名' '新地名'`。可重复 `--replace` 登记多处。当前定稿必须恰好等于这些替换结果，改后文字须出现在原话中；普通 `next` 验证通过后才沿用确认。会话记录可读取时要求原话与最近用户消息一致；不可读取时会留下提示并继续。多余改动、整集替换、撤回或证据失效都不会沿用。
 
-助手主动的小幅润色，在确认没有人物身份、情节事实或结尾变化后登记：`./run.sh edit assistant-change projects/my-book 3 --replace '旧句' '新句' --risk-review '仅调整语序，不改变人物、事实或结尾' --no-identity-change --no-plot-fact-change --no-ending-change`。默认阈值为 `approvals.minor_change_ratio: 0.03`，可在 `project.yaml` 单独调整。`next` 和 `进度.md` 会列出改前改后、比例和风险核查；收到“拍板文案”后，本集/全季文案确认日志绑定新版定稿。超阈值、整集替换或任一风险项不通过时不能登记为小改，按正常文案确认处理。
+助手主动小改先登记：`./run.sh edit assistant-change projects/my-book 3 --replace '旧句' '新句' --risk-review '仅调整语序，不改变人物、事实或结尾' --no-identity-change --no-plot-fact-change --no-ending-change`。默认阈值 `approvals.minor_change_ratio: 0.03`；证据和风险检查均通过、没有其他变化时保留文案确认。`next` 列出待过目清单，下次人工确认一起看，不为小改单独卡住制作。超限、整集替换、未登记变动或证据失效仍要求重新确认；前情和媒体须按新内容重检。
 
 主体口播和声音设计分开：旁白、音效分别列入正式清单，绑定稿件版本、句子锚点和费用证据，再由本地阶段合成。当前豆包 2.0 适配器尚未完成真实服务端/账单验收；豆包 1.0 付费音效适配器尚未接入。声音流程与安全边界见 [produce-audio](.agents/skills/produce-audio/SKILL.md)。
 
@@ -72,7 +72,7 @@ python3 -m venv .venv
 # 历史叙事等题材可显式加 --profile story；旧项目不会自动改档位。
 ./run.sh ingest projects/my-book '/绝对路径/原文.epub'
 ./run.sh status projects/my-book
-./run.sh guard projects/my-book draft --ep 1
+./run.sh next projects/my-book
 ```
 
 TXT、Markdown、EPUB、DOCX 可直接导入。PDF、MOBI 在首版中需先转换为 TXT/EPUB；扫描 PDF 需先 OCR。脚本不会处理 DRM。已有原文 generation 不同的导入会被拒绝，请另建项目用于新版本，避免旧段落编号指向新内容。
@@ -120,7 +120,7 @@ TXT、Markdown、EPUB、DOCX 可直接导入。PDF、MOBI 在首版中需先转�
 
 `check <项目>` 读取 `next` 的当前阶段，汇总该阶段的机器检查、错误和待人工事项；拆书阶段会重生成 `analysis/coverage_machine.json`，但保留独立人工 `coverage_review.yaml`，其余阶段只读。归档检查核对完整清单、目标路径和文件大小，不会下载仅在线文件重算哈希；检查通过不等于用户确认或云端现场验收。旧单项检查命令仍保留兼容，尚未全部移入 `dev`。`lint/quotes/check-plan/story-check/review-check` 有错误时退出码为 1。`story-check` 只读选取每集定稿或最新工作稿，核对全季年份写法、线索 `spoken_key` 在埋点和回收集的实际出现，以及集长分布；缺集不推算分布。它也可诊断尚未迁入 `story` 档位的旧项目，并在结果中标出原档位，不改配置。长描述性称呼重复属于单集 `lint` 的启发式提醒，不是人物身份结论。全季字数阈值仍是未获用户确认的候选基线。预览允许显示尚未通过的稿件，但会在页面明确显示缺项；它不代表正式验收。
 
-新记录的文案确认会在本机 `approvals/log.yaml` 保存确认当时的纯口播快照；此文件属于被 Git 忽略的书目资料。文案变动时，`next` 会显示集号、文件及首处文字差异，状态仍为待重新确认。旧确认若没有快照，只能报告文件及哈希变化，不能伪造改前内容。用户改稿沿用确认、助手小改待过目的分级规则尚未实现，不应把差异提示当成自动批准。
+本机 `approvals/log.yaml` 保存文案确认时的纯口播快照，属于不上传的书目资料。`next` 显示集号、文件和首处差异，按用户改稿依据、助手小改证据或实质变化分别处理；旧记录无快照时不猜测改前文字。保留确认与媒体内容仍有效是两回事，不可互相替代。
 
 ## 正式定稿
 
@@ -140,10 +140,17 @@ TXT、Markdown、EPUB、DOCX 可直接导入。PDF、MOBI 在首版中需先转�
 
 ## 验证
 
+只改技能与说明时先运行快速集（目标一分钟内，不跑媒体编码）；修改行为时还需相关回归、完整集和自检。
+
 ```bash
-.venv/bin/python -m unittest discover -s tests -v
+./run.sh test --fast
+./run.sh test
 ./run.sh selftest
 ```
+
+无本地虚拟环境但 `python3` 已有依赖时，等价入口是 `python3 -m bookflow test --fast`、`python3 -m bookflow test` 和 `python3 -m bookflow selftest`。快速集不能代替行为修改的完整回归。
+
+共享剧情写法见 [story_craft.md](style/story_craft.md)。私有 `style/personal.yaml` 不上传；迁机时与 `projects/` 一起备份、恢复到私人存储，`doctor` 检查其存在性，但不据此声称云端上传或仅在线状态已验证。
 
 `selftest` 在临时目录运行原创示范书：从新建、导入、稿件预览到静音口播/音效、占位图、字幕、真实 MP4、测试事实审校与正式格式交付；再用独立的假云目录模拟上传阻断、归档和哈希取回。ffprobe 核对音视频流与时长，抽帧检查字幕。所有测试确认和测试审校均标为 `test_fixture_only`，不会进入真实项目；返回 `scope: text_media_fixture`，仍不代表真实付费制作、人工审校/试听、OneDrive 或发布验收。无 ffmpeg/ffprobe 时自检明确失败。单元测试覆盖文件保留、导入顺序、范围证据、独立审稿缺项、核心深度、前后集依赖等。
 

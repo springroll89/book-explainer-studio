@@ -18,6 +18,8 @@ quote:
   max_ratio: 0.12
   max_single_chars: 80
 review:
+  listener_enabled: false  # 按需显式开启；开启后仍要求独立上下文
+  deai_enabled: false      # 默认并入写稿自查和 lint
   max_rounds: 3
   max_p1: 3
 gates:

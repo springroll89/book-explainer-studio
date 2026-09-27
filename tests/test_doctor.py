@@ -13,6 +13,15 @@ from bookflow.flow import derive
 
 
 class DoctorTests(unittest.TestCase):
+    def test_private_style_presence_is_reported_without_reading_contents(self):
+        with tempfile.TemporaryDirectory() as temp, patch("bookflow.doctor.ROOT", Path(temp)):
+            absent = check(full=True)
+            self.assertEqual(next(row for row in absent["checks"] if row["id"] == "personal_style")["status"], "warning")
+            write_yaml(Path(temp) / "style/personal.yaml", {"private": "private-style-canary"})
+            present = check(full=True)
+            self.assertEqual(next(row for row in present["checks"] if row["id"] == "personal_style")["status"], "success")
+            self.assertNotIn("private-style-canary", str(present))
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)

@@ -4,12 +4,26 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
+from bookflow.__main__ import dispatch, parser
 from bookflow.common import ROOT, atomic_write, write_yaml
 from bookflow.lessons import inbox
 
 
 class CliTests(unittest.TestCase):
+    def test_test_command_selects_fast_or_full_suite_and_propagates_failure(self):
+        for flags, expected in (([], "full"), (["--fast"], "fast")):
+            for code in (0, 1):
+                with self.subTest(flags=flags, code=code), \
+                     patch("subprocess.run", return_value=SimpleNamespace(returncode=code)) as run:
+                    result = dispatch(parser().parse_args(["test", *flags]))
+                    self.assertEqual(result, {"passed": code == 0, "suite": expected})
+                    command = run.call_args.args[0]
+                    self.assertEqual("discover" in command, expected == "full")
+                    self.assertEqual("tests.test_hygiene" in command, expected == "fast")
+
     def run_cli(self, *args):
         return subprocess.run([sys.executable, '-m', 'bookflow', *map(str, args)],
                               cwd=ROOT, text=True, capture_output=True, check=False)

@@ -179,6 +179,21 @@ class LedgerReviewTests(unittest.TestCase):
         report["reviewers"]["listener"]["independent"] = False
         self.assertFalse(review.evaluate(self.project, 1, self.paths[1], report)["passed"])
 
+    def test_explainer_fact_only_passes_review_and_legacy_ledger_by_default(self):
+        report = self.report(1)
+        report["reviewers"] = {"fact": report["reviewers"]["fact"]}
+        report.pop("listener")
+        self.assertTrue(review.evaluate(self.project, 1, self.paths[1], report)["passed"])
+        record_confirmation(self.project, "script", "拍板文案", [1], verify_transcript=False)
+        stamped = ledger.stamp(self.project, 1, "测试确认者", self.save_review(1, report))
+        self.assertTrue(stamped["passed"], stamped)
+        self.assertTrue(ledger.context(self.project, 2)["passed"])
+        self.cfg["review"]["listener_enabled"] = True
+        self.cfg["review"]["deai_enabled"] = True
+        write_yaml(self.project / "project.yaml", self.cfg)
+        self.assertFalse(review.evaluate(self.project, 1, self.paths[1], report)["passed"])
+        self.assertFalse(ledger.context(self.project, 2)["passed"])
+
     def test_missing_predecessor_blocks_context(self):
         self.assertFalse(ledger.context(self.project, 2)["passed"])
 

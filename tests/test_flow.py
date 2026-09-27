@@ -249,6 +249,34 @@ class FlowTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_confirmation("拍板文案，但第 2 集再改")
 
+    def test_confirmation_accepts_ime_punctuation_and_episode_labels(self):
+        for quote, expected in (("拍板文案，除5", [5]), ("拍板文案除第5集", [5]),
+                                ("拍板样片，除第3集、4集", [3, 4]),
+                                ("拍版 文案 除 1,第12集。", [1, 12])):
+            with self.subTest(quote=quote):
+                self.assertEqual(parse_confirmation(quote)["exclude"], expected)
+        self.assertEqual(parse_confirmation("拍板 方案")["gate"], "plan")
+        for quote in ("拍板文案除0", "拍板文案除,5", "拍板文案除5,", "拍板文案除第5集再改",
+                      "撤回文案，除5", "拍板文案除1-12"):
+            with self.subTest(quote=quote), self.assertRaises(ValueError):
+                parse_confirmation(quote)
+
+    @patch("bookflow.text_checks.check_drafts", return_value={"passed": True, "errors": []})
+    @patch("bookflow.flow.check_plan", return_value={"errors": []})
+    @patch("bookflow.continuity.context", return_value={"complete": True, "errors": []})
+    def test_pending_confirmation_lists_nonconsecutive_episodes(self, *_checks):
+        self.prepare_source_plan()
+        write_yaml(self.project / "plan/episodes.yaml", {"episodes": [{"ep": ep} for ep in (1, 2, 12)]})
+        record_confirmation(self.project, "plan", "拍板方案", verify_transcript=False)
+        for ep in (1, 2, 12):
+            for name in ("draft_v1.md", "final.md"):
+                atomic_write(self.project / f"episodes/ep{ep:02d}" / name, "测试文本。")
+        write_yaml(self.project / "notes.yaml", {"workflow": {"season_review_status": "completed"}})
+        record_confirmation(self.project, "script", "拍板文案", [2], verify_transcript=False)
+        state = derive(self.project)
+        self.assertEqual(state["needs_you"], ["文案确认：第 1、12 集"])
+        self.assertIn("第 1、12 集", state["next_step"])
+
     def test_import_requires_source_validation_record(self):
         self.prepare_source_plan()
         (self.project / "analysis/source_validation.json").unlink()

@@ -213,7 +213,8 @@ def parser() -> argparse.ArgumentParser:
     sc = src.add_subparsers(dest="action", required=True)
     sm=sc.add_parser("migrate"); sm.add_argument("project", type=Path); sm.add_argument("--to", required=True)
     sw=sc.add_parser("switch"); sw.add_argument("project", type=Path); sw.add_argument("--to", required=True)
-    sub.add_parser("test", help="运行自动测试")
+    test = sub.add_parser("test", help="运行自动测试（默认完整集）")
+    test.add_argument("--fast", action="store_true", help="只跑文档/技能卫生、配置与基础规则快速集")
     sub.add_parser("selftest", help="在临时目录运行无模型的文字与静音媒体自检")
     produce = sub.add_parser("produce", help="按清单推进本集音画阶段；正式配音需显式开启付费调用")
     produce.add_argument("project", help="书目项目路径；只读检查时写 check")
@@ -303,7 +304,10 @@ def dispatch(args) -> dict | str:
     cmd = args.command
     if cmd == "test":
         import subprocess
-        return {"passed": subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests"], cwd=ROOT).returncode == 0}
+        suite = (["tests.test_hygiene", "tests.test_rules_index", "tests.test_doctor", "tests.test_versioning"]
+                 if args.fast else ["discover", "-s", "tests"])
+        return {"passed": subprocess.run([sys.executable, "-m", "unittest", *suite], cwd=ROOT).returncode == 0,
+                "suite": "fast" if args.fast else "full"}
     if cmd == "selftest":
         from .selftest import run
         return run()

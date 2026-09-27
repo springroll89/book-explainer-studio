@@ -15,4 +15,4 @@ description: 在本书籍精讲项目原文已入库后，逐章拆书、汇总�
 
 机器报告 `coverage_machine.json` 与语义判断 `coverage_review.yaml` 分开保存。按工作模式交付可审简报与未决项；不把机器清零当完整阅读。
 
-分析完成后保留原文批次指纹；外文项目同步维护 `analysis/quote_bank.yaml` 和译名表。G1 前运行 `./run.sh guard <project> outline`。
+分析完成后保留原文批次指纹；外文项目同步维护 `analysis/quote_bank.yaml` 和译名表。运行 `./run.sh next <project>` 和阶段 `check`，再准备方案确认材料。

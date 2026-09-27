@@ -10,6 +10,16 @@ from bookflow.hygiene import audit
 
 
 class HygieneTests(unittest.TestCase):
+    def test_active_skills_and_references_reject_legacy_workflow(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for token in ("guard", "G1", "G2", "G3", "G4", "AV1", "RELEASE", "ChatCut"):
+                atomic_write(root / f".agents/skills/sample/references/{token}.md", "执行" + token + "确认\n")
+            atomic_write(root / "docs/history.md", "旧版 G1 仅作历史记录。\n")
+            findings = audit(root)["findings"]
+            self.assertEqual(len(findings), 8)
+            self.assertTrue(all(item["rule"] == "legacy_skill_workflow" for item in findings))
+
     def test_tracked_shared_tree_is_clean(self):
         root = Path(__file__).resolve().parents[1]
         report = audit(root, tracked_only=True)

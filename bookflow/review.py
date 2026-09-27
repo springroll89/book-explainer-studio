@@ -7,6 +7,13 @@ import yaml
 from .common import full_season_review, load_config, load_yaml, parse_draft, sha256_file, source_generation
 
 
+def required_roles(config: dict) -> tuple[str, ...]:
+    """Facts are mandatory; separate listening/style review is explicit opt-in."""
+    review = config.get("review", {})
+    return ("fact",) + tuple(role for role in ("listener", "deai")
+                             if review.get(f"{role}_enabled") is True)
+
+
 def _episodes(project: Path) -> list:
     plan = load_yaml(project / "plan" / "episodes.yaml", default={})
     episodes = plan if isinstance(plan, list) else (plan or {}).get("episodes", [])
@@ -144,8 +151,8 @@ def evaluate(project: Path, ep: int, draft: Path, report: dict) -> dict:
                 errors.append(f"核心认知 {tid} 未证明已讲出且有原文依据。")
     reviewers = report.get("reviewers", {})
     role_reports, role_artifacts = {}, {}
-    optional_story_roles = tuple(role for role in ("listener", "deai") if isinstance(reviewers, dict) and role in reviewers)
-    roles_to_check = ("fact",) + (optional_story_roles if story else ("listener", "deai"))
+    supplied_roles = tuple(role for role in ("listener", "deai") if isinstance(reviewers, dict) and role in reviewers)
+    roles_to_check = tuple(dict.fromkeys((*required_roles(cfg), *supplied_roles)))
     for role in roles_to_check:
         record = reviewers.get(role) if isinstance(reviewers, dict) else None
         if not isinstance(record, dict) or record.get("status") != "completed":
@@ -223,7 +230,7 @@ def evaluate(project: Path, ep: int, draft: Path, report: dict) -> dict:
     limit = cfg.get("review", {}).get("max_p1", cfg.get("review", {}).get("max_unresolved_p1", 3))
     if unresolved_p1 > limit:
         errors.append(f"未解决 P1 共 {unresolved_p1} 条，超过上限 {limit}。")
-    if not story:
+    if "listener" in roles_to_check:
         listener_role = role_reports.get("listener", {})
         listener = listener_role.get("listener", listener_role if "engaged" in listener_role else None)
         if not isinstance(listener, dict):
@@ -236,7 +243,7 @@ def evaluate(project: Path, ep: int, draft: Path, report: dict) -> dict:
             result["hook_alignment"] = alignment
             if alignment["invalid_hooks"] or alignment["invalid_responses"]:
                 errors.append("钩子或观众反应的句子 id 无效，或触发原句与当前稿件不一致。")
-            if not alignment["hooks"] or alignment["fulfil_rate"] < alignment["threshold"]:
+            if not story and (not alignment["hooks"] or alignment["fulfil_rate"] < alignment["threshold"]):
                 errors.append("钩子与独立观众反应的匹配率未达标。")
             if alignment["failed"]:
                 warnings.append("存在钩子后立即失去兴趣的观众反馈，需在终审中说明。")

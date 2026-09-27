@@ -7,6 +7,7 @@
 | 原文导入与不可变批次 | [source.py](../bookflow/source.py) |
 | 事实、改述与引用 | [fidelity.md](../style/fidelity.md) |
 | 剧情叙事取向 | [narrative_charter.md](../style/narrative_charter.md) |
+| 跨书剧情写作手艺 | [story_craft.md](../style/story_craft.md) |
 | 口播语言 | [spoken_rules.md](../style/spoken_rules.md) |
 | 分集与覆盖检查 | [planning.py](../bookflow/planning.py) |
 | 阶段与下一步 | [flow.py](../bookflow/flow.py) |

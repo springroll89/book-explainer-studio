@@ -389,7 +389,7 @@ def derive(project: Path) -> dict:
             if not state.get("change_pending"):
                 result["blockers"].append(f"第 {ep} 集文案变化：" + "；".join(
                     f"{item['file']}（{item.get('detail', item['reason'])}）" for item in state["changed_files"]))
-        span = f"第 {pending[0]}–{pending[-1]} 集" if len(pending) > 1 else f"第 {pending[0]} 集"
+        span = "第 " + "、".join(str(ep) for ep in pending) + " 集"
         review = "；并一并过目：" + "；".join(result["change_pending"]) if result["change_pending"] else ""
         return step(8, f"请你阅读{span}文案{review}并回复“拍板文案”", "你", needs_you=f"文案确认：{span}")
     if recap_path.exists() or recap_path.is_symlink():

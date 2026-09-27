@@ -276,8 +276,13 @@ class ApprovalCarryTests(unittest.TestCase):
         self.assertLessEqual(result["change_ratio"], 0.03)
         before_log = len(read_log(self.project))
         before_evidence = Path(result["path"]).read_bytes()
+        confirmation = confirmation_state(self.project, "script", 1)
+        self.assertEqual(confirmation["state"], "passed")
+        self.assertTrue(confirmation["changed_files"])
         readonly = derive(self.project)
         self.assertTrue(readonly["change_pending"])
+        self.assertFalse(any("文案确认" in item for item in readonly["needs_you"]))
+        self.assertTrue(readonly["downstream_impacts"])
         self.assertEqual(len(read_log(self.project)), before_log)
         self.assertEqual(Path(result["path"]).read_bytes(), before_evidence)
         state = write(self.project)
@@ -287,6 +292,21 @@ class ApprovalCarryTests(unittest.TestCase):
         self.assertTrue(approved["passed"], approved)
         self.assertEqual(confirmation_state(self.project, "script", 1)["state"], "passed")
         self.assertEqual(derive(self.project)["change_pending"], [])
+
+    def test_minor_evidence_does_not_cover_later_unrecorded_change_or_revoke(self):
+        old, new = "这十二分钟是谁留下的？", "这十二分钟是谁留下的："
+        edited = self.original.replace(old, new)
+        atomic_write(self.final, edited)
+        registered = record_assistant_edit(
+            self.project, 1, [(old, new)], "仅改标点。",
+            no_identity_change=True, no_plot_fact_change=True, no_ending_change=True)
+        self.assertTrue(registered["passed"], registered)
+        atomic_write(self.final, edited.replace("手机显示五点四十", "手机显示六点四十"))
+        self.assertEqual(confirmation_state(self.project, "script", 1)["state"], "invalidated")
+        atomic_write(self.final, edited)
+        self.assertTrue(record_confirmation(self.project, "script", "撤回文案", [1],
+                                            verify_transcript=False)["passed"])
+        self.assertEqual(confirmation_state(self.project, "script", 1)["state"], "revoked")
 
     def test_assistant_edit_over_threshold_or_risk_flag_is_not_minor(self):
         old = "手机显示五点四十，墙上的大钟却指向五点五十二。"

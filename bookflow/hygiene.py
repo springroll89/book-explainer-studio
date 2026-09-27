@@ -18,6 +18,7 @@ PATTERNS = {
 INLINE_LINK = re.compile(r"\[[^\]\n]+\]\((<[^>\n]+>|[^)\s]+)(?:\s+['\"][^'\"]*['\"])?\)")
 REFERENCE_LINK = re.compile(r"^\s*\[[^\]\n]+\]:\s*(<[^>\n]+>|\S+)")
 REMOTE_LINK = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+LEGACY_WORKFLOW = re.compile(r"(?<![A-Za-z0-9_])(?:guard|G[1-4]|AV1|RELEASE|ChatCut)(?![A-Za-z0-9_])")
 CURRENT_COUNT = re.compile(
     r"(?:当前|现有|共有|本文件是|本项目有|目前)[^。\n]{0,40}"
     r"\d+\s*(?:个|项)\s*(?:项目技能|技能|自动测试|测试)"
@@ -141,6 +142,8 @@ def audit(root: Path, *, tracked_only: bool = False, projects_dir: Path | None =
                 issue(path, "unreadable_text")
                 continue
             for number, line in enumerate(lines, 1):
+                if directory == ".agents/skills" and LEGACY_WORKFLOW.search(line):
+                    issue(path, "legacy_skill_workflow", number)
                 for rule, pattern in PATTERNS.items():
                     if rule == "book_path":
                         is_code = path.suffix.lower() in {".py", ".sh", ".yaml", ".yml", ".toml", ".json"}

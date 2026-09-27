@@ -95,6 +95,12 @@ def check(project: Path | None = None, *, full: bool = True) -> dict:
             add("project_writable", "success", "项目目录可写")
 
     if full:
+        personal = ROOT / "style/personal.yaml"
+        if personal.is_file():
+            add("personal_style", "success", "本机私有风格文件存在（未上传；不代表已有备份）")
+        else:
+            add("personal_style", "warning", "缺少可选的 style/personal.yaml；已有私有偏好可能未迁入",
+                "有私有偏好时从备份恢复；将该文件与 projects 一起备份到已配置的私人 OneDrive，勿提交公开仓库")
         for executable in ("ffmpeg", "ffprobe"):
             if shutil.which(executable):
                 add(executable, "success", f"{executable} 可执行")

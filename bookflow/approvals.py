@@ -113,7 +113,7 @@ def override(project: Path, rule: str, reason: str) -> dict:
 
 # The four content approvals below replace the terminal gates for new projects.
 CONFIRMATIONS = {"方案": "plan", "文案": "script", "样片": "sample", "成片": "release"}
-_COMMAND = re.compile(r"^(拍板|撤回)(方案|文案|样片|成片)(?:除([0-9,]+))?$")
+_COMMAND = re.compile(r"^(拍板|撤回)(方案|文案|样片|成片)(?:,?除(第?[1-9][0-9]*集?(?:,第?[1-9][0-9]*集?)*))?$")
 _DEFAULT_SAMPLE = {
     "mix": "production/final_mix.wav",
     "subtitles": "production/subtitles.srt",
@@ -132,7 +132,7 @@ def parse_confirmation(quote: str) -> dict:
         raise ValueError("撤回口令不使用“除”；请用 --eps 指定范围")
     return {"action": "approve" if action == "拍板" else "revoke",
             "gate": CONFIRMATIONS[label],
-            "exclude": [int(value) for value in excluded.split(",")] if excluded else []}
+            "exclude": [int(value) for value in re.findall(r"[0-9]+", excluded)] if excluded else []}
 
 
 def _planned_episodes(project: Path) -> list[int]:
@@ -595,7 +595,7 @@ def record_assistant_edit(project: Path, ep: int, replacements: list[tuple[str, 
     if basis is None:
         return {"passed": False, "errors": ["小改证据写入后复核失败；记录保留但不会被 next 采纳"]}
     return {"passed": True, "record": record, "path": str(path), "change_ratio": ratio,
-            "next_actions": ["运行 next；在文案确认时一并过目该改动"]}
+            "next_actions": ["运行 next；小改不阻塞制作，在下次人工确认时一并过目"]}
 
 
 def record_user_edit_instruction(project: Path, ep: int, quote: str,
@@ -846,6 +846,7 @@ def confirmation_state(project: Path, gate: str, ep: int | None = None) -> dict:
                             else "approvals/log.yaml",
                             "reason": "carry_evidence_invalid", "detail": "人工改稿沿用依据已失效"})
     change_pending = []
+    minor_files = set()
     if gate == "script":
         assistant_dir = Path(project).resolve() / "feedback/assistant_changes"
         if assistant_dir.is_dir() and not assistant_dir.is_symlink():
@@ -863,10 +864,15 @@ def confirmation_state(project: Path, gate: str, ep: int | None = None) -> dict:
                 if len(candidates) == 1:
                     path, basis = candidates[0]
                     report = json.loads(path.read_text(encoding="utf-8"))
+                    minor_files.add(item["file"])
                     change_pending.append(
                         f"第{episode}集改动待过目：{_spoken_change(report['before_spoken'], report['after_spoken'])}；"
                         f"风险核查：{report['risk_review']['note']}（{basis['change_ratio']:.1%}）")
-    return {"state": "invalidated" if changed or not current["passed"] else "passed",
+    # Keep all changed hashes visible to downstream media invalidation. Only
+    # evidenced minor edits are exempt from a new human script confirmation.
+    blocking_changes = [item for item in changed if not (
+        item["reason"] == "content_changed" and item["file"] in minor_files)]
+    return {"state": "invalidated" if blocking_changes or not current["passed"] else "passed",
             "changed_files": changed, "change_pending": change_pending,
             "at": last.get("at"), "quote": last.get("quote")}
 

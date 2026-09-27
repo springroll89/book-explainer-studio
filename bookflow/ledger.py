@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .common import load_config, load_yaml, parse_draft, sha256_file, source_generation, write_yaml
 from .quality import lint, verify_quotes
-from .review import evaluate
+from .review import evaluate, required_roles
 from .approvals import confirmation_state
 
 REQUIRED = {
@@ -77,8 +77,7 @@ def _problems(project: Path, entry: dict, generation) -> list[str]:
         if not review_path.is_file() or entry.get("review_sha256") != sha256_file(review_path):
             errors.append("入账时的审校报告已缺失或修改。")
     artifacts = entry.get("review_artifacts", {})
-    required_roles = ("fact",) if load_config(project).get("profile") == "story" else ("fact", "listener", "deai")
-    for role in dict.fromkeys((*required_roles, *(artifacts.keys() if isinstance(artifacts, dict) else ()))):
+    for role in dict.fromkeys((*required_roles(load_config(project)), *(artifacts.keys() if isinstance(artifacts, dict) else ()))):
         artifact = artifacts.get(role, {}) if isinstance(artifacts, dict) else {}
         role_name = artifact.get("path")
         role_path = Path(role_name) if role_name else None
