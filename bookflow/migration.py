@@ -1,6 +1,7 @@
 from __future__ import annotations
-import difflib, json
+import difflib, hashlib, json
 import sys
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
 from .common import load_yaml, read_paragraphs, source_generation, write_json, atomic_write
@@ -12,14 +13,29 @@ def migrate(project,to_generation):
  for line in target.read_text(encoding='utf-8').splitlines():
   if line.strip():
    x=json.loads(line); new[x['id']]=x
- mapping=[]; used=set()
- for oid,o in old.items():
-  best=None; score=0
-  for nid,n in new.items():
+ mapping=[]; used=set(); exact={}
+ old_items=list(old.items()); new_items=list(new.items())
+ def digest(text): return hashlib.sha256(text.encode('utf-8')).hexdigest()
+ by_hash=defaultdict(deque)
+ for nid,row in new_items: by_hash[digest(row.get('text',''))].append(nid)
+ for oid,row in old_items:
+  candidates=by_hash[digest(row.get('text',''))]
+  if candidates:
+   exact[oid]=candidates.popleft(); used.add(exact[oid])
+ for index,(oid,o) in enumerate(old_items):
+  if oid in exact:
+   mapping.append({'old_pid':oid,'new_pid':exact[oid],'relation':'same','similarity':1.0})
+   continue
+  best=None; score=0.0
+  center=round(index*len(new_items)/max(1,len(old_items)))
+  for nid,n in new_items[max(0,center-24):min(len(new_items),center+25)]:
    if nid in used: continue
-   s=difflib.SequenceMatcher(None,o.get('text',''),n.get('text','')).ratio()
-   if s>score: best,score=nid,s
-  if best and score>=0.8: used.add(best); rel='same' if score==1 else 'edited'; mapping.append({'old_pid':oid,'new_pid':best,'relation':rel,'similarity':round(score,3)})
+   old_text=o.get('text',''); new_text=n.get('text','')
+   if not old_text or not new_text or min(len(old_text),len(new_text))/max(len(old_text),len(new_text))<0.6: continue
+   similarity=difflib.SequenceMatcher(None,old_text,new_text).ratio()
+   if similarity>score: best,score=nid,similarity
+  if best and score>=0.8:
+   used.add(best); mapping.append({'old_pid':oid,'new_pid':best,'relation':'edited','similarity':round(score,3)})
   else: mapping.append({'old_pid':oid,'new_pid':None,'relation':'deleted'})
  for nid in new:
   if nid not in used: mapping.append({'old_pid':None,'new_pid':nid,'relation':'new'})
@@ -33,5 +49,5 @@ def switch(project,to_generation):
  if input(f'请输入“切换原文 {to_generation[:8]}”以确认：').strip()!=f'切换原文 {to_generation[:8]}': return {'passed':False,'errors':['确认短语不匹配，未切换']}
  cur=p/'source/current.json'; backup=p/'source/backups'/datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')/'current.json'; backup.parent.mkdir(parents=True,exist_ok=True)
  if cur.exists(): backup.write_bytes(cur.read_bytes())
- cur.write_text(json.dumps({'generation':to_generation,'switched_at':datetime.now(timezone.utc).isoformat()},ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+ atomic_write(cur,json.dumps({'generation':to_generation,'switched_at':datetime.now(timezone.utc).isoformat()},ensure_ascii=False,indent=2)+'\n')
  return {'passed':True,'generation':to_generation,'backup':str(backup)}

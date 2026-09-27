@@ -59,6 +59,20 @@ def sha256_file(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def latest_draft(episode_dir: Path, *, prefer_final: bool = False) -> Path | None:
+    """Return the newest numbered draft, or the final script when requested."""
+    episode_dir = Path(episode_dir)
+    final = episode_dir / "final.md"
+    if prefer_final and final.is_file():
+        return final
+    versions = []
+    for path in episode_dir.glob("draft_v*.md"):
+        match = re.fullmatch(r"draft_v(\d+)\.md", path.name)
+        if match:
+            versions.append((int(match.group(1)), path))
+    return max(versions, default=(0, None), key=lambda item: item[0])[1]
+
+
 def deep_merge(base: dict, override: dict) -> dict:
     out = dict(base)
     for key, value in override.items():

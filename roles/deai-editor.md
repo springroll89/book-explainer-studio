@@ -21,4 +21,4 @@
 
 写 `review/deai_vN.yaml`，标明稿件指纹与检查范围。每条给句子 ID、原句、具体问题和一条最小改写；必要时写“需先向 fact-checker 核实”。推荐自然好句时标为样本候选，不作用户认可记录。优先修听不懂的地方，再修语感。
 
-结构化报告顶层记录 `draft_sha256`、`source_generation`、`dependency_hashes`。问题数组使用 `findings`，每项含 `id/severity/category/message/resolved`；实际核对的句子和证据可作附加字段。不得把未核实项写成已完成。
+结构化报告的共用字段与未核实项处理，见 [fact-checker 的输出格式](fact-checker.md#输出)；本角色的逐句口语建议仍按上段填写。

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import tempfile
 import uuid
@@ -162,18 +163,35 @@ def read_markdown(path: Path) -> dict:
         end = text.find("\n---", 4)
         if end >= 0:
             text = text[end + 4:]
+    clean_parts, found_comments = [], []
+    cursor = clean_length = 0
+    for match in re.finditer(r"<!--(.*?)-->", text, flags=re.S):
+        part = text[cursor:match.start()]
+        clean_parts.append(part)
+        clean_length += len(part)
+        found_comments.append((clean_length, match.group(1).strip()))
+        cursor = match.end()
+    clean_parts.append(text[cursor:])
+    text = "".join(clean_parts)
     headings, paragraphs = [], []
+    paragraph_spans = []
     current = ""
     pending = []
+    pending_start = 0
+    pending_end = 0
     def flush():
         if pending:
             value = "".join(pending).strip()
             if value:
                 paragraphs.append(value)
+                paragraph_spans.append((pending_start, pending_end))
             pending.clear()
-    for line in text.splitlines():
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        line_start = offset
+        offset += len(line)
         stripped = line.strip()
-        if not stripped or stripped.startswith("<!--") or stripped.startswith(">"):
+        if not stripped or stripped.startswith(">"):
             flush()
             continue
         if stripped.startswith("## "):
@@ -184,10 +202,22 @@ def read_markdown(path: Path) -> dict:
         if stripped.startswith("# "):
             flush()
             continue
+        if not pending:
+            pending_start = line_start
+        pending_end = offset
         pending.append(stripped)
     flush()
+    comments = {}
+    for index, (position, content) in enumerate(found_comments, 1):
+        nearest = next((i for i, (start, end) in enumerate(paragraph_spans) if start <= position <= end), None)
+        if nearest is None and paragraph_spans:
+            earlier = [i for i, (_, end) in enumerate(paragraph_spans) if end <= position]
+            nearest = earlier[-1] if earlier else 0
+        comments[f"md{index:03d}"] = {"text": content,
+                                       "anchor": paragraphs[nearest] if nearest is not None else "",
+                                       "author": "Markdown"}
     return {"identity": "", "paragraphs": paragraphs, "headings": headings,
-            "comments": {}, "tracked_changes": False}
+            "comments": comments, "tracked_changes": False}
 
 
 def create_copy(draft: Path, output: Path, format: str = "both") -> dict:
@@ -197,7 +227,8 @@ def create_copy(draft: Path, output: Path, format: str = "both") -> dict:
         raise ValueError("稿件不在书目项目中")
     if output.exists():
         raise ValueError("编辑目录已存在；请使用新目录，避免覆盖人工修改")
-    parsed = parse_draft(draft.read_text(encoding="utf-8"))
+    from .sentences import parse_draft_file
+    parsed = parse_draft_file(draft)
     blocks = make_blocks(parsed)
     if not blocks:
         raise ValueError("稿件没有口播正文")
@@ -216,6 +247,7 @@ def create_copy(draft: Path, output: Path, format: str = "both") -> dict:
         if format in {"md", "both"}:
             write_markdown(markdown, title, blocks)
         shutil.copyfile(draft, stage / "original.md")
+        shutil.copyfile(draft.with_suffix(".sentences.json"), stage / "original.sentences.json")
         write_json(stage / "baseline.json", {
             "schema": 1, "identity": identity, "project": str(project),
             "draft": str(draft), "draft_sha256": sha256_file(draft),
@@ -348,7 +380,8 @@ def import_edits(docx: Path, baseline_path: Path) -> dict:
     baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
     if sha256_file(baseline_path.parent / "original.md") != baseline["draft_sha256"]:
         raise ValueError("原稿快照校验失败，停止比较")
-    original = parse_draft((baseline_path.parent / "original.md").read_text(encoding="utf-8"))
+    from .sentences import parse_draft_file
+    original = parse_draft_file(baseline_path.parent / "original.md")
     if make_blocks(original) != baseline["blocks"]:
         raise ValueError("基线段落与原稿不符，停止比较")
     project = Path(baseline["project"])
@@ -361,6 +394,24 @@ def import_edits(docx: Path, baseline_path: Path) -> dict:
     if not edited["paragraphs"]:
         raise ValueError("编辑稿正文为空，停止导入")
     report = compare(baseline["blocks"], edited["paragraphs"])
+    episode = baseline.get("episode")
+    if type(episode) is int and episode > 0:
+        relative = f"episodes/ep{episode:02d}/final.md"
+        final = project / relative
+        baseline_draft = Path(baseline.get("draft", "")).resolve()
+        if final.is_file() and baseline_draft == final.resolve():
+            from .approvals import _spoken_snapshot, read_log
+            snapshot = _spoken_snapshot(baseline_path.parent / "original.md")
+            if _spoken_snapshot(final) == snapshot:
+                approvals = [row for row in read_log(project) if row.get("gate") == "script"
+                             and isinstance(row.get("episodes"), list) and episode in row["episodes"]]
+                if approvals and approvals[-1].get("action") in {"approve", "carry"}:
+                    prior = approvals[-1]
+                    files, snapshots = prior.get("deliverables"), prior.get("spoken_snapshots")
+                    if (isinstance(prior.get("at"), str) and isinstance(files, dict)
+                            and files.get(relative) == hashlib.sha256(snapshot.encode()).hexdigest()
+                            and isinstance(snapshots, dict) and snapshots.get(relative) == snapshot):
+                        report["prior_approval_at"] = prior["at"]
     from .names import feedback_candidates
     report["name_review_candidates"] = feedback_candidates(project, baseline["blocks"], report["changes"])
     original_headings = list(dict.fromkeys(b["section"] for b in baseline["blocks"] if b["section"]))
@@ -375,7 +426,11 @@ def import_edits(docx: Path, baseline_path: Path) -> dict:
     round_id = hashlib.sha256((baseline["identity"] + digest).encode()).hexdigest()[:20]
     destination = project / "feedback/rounds" / round_id
     if destination.exists():
-        return {"round": str(destination), "status": "already_imported", "warnings": warnings}
+        from .lessons import record_edit_round
+        saved = json.loads((destination / "diff.json").read_text(encoding="utf-8"))
+        lesson = record_edit_round(project, destination, saved)
+        return {"round": str(destination), "status": "already_imported", "warnings": warnings,
+                "lesson": lesson}
     report.update(schema=1, round_id=round_id, episode=baseline.get("episode"),
                   baseline_identity=baseline["identity"], source_generation=baseline["source_generation"],
                   original_docx_sha256=baseline.get("docx_sha256"), edited_docx_sha256=digest if not is_markdown else None,
@@ -411,8 +466,10 @@ def import_edits(docx: Path, baseline_path: Path) -> dict:
         write_yaml(stage / "learning.yaml", {"status": "pending_semantic_review", "round_id": round_id,
                    "items": [], "note": "仅保存真实修改；由 learn-feedback 结合上下文提炼，不能把模型推测当作用户理由。"})
         stage.rename(destination)
+    from .lessons import record_edit_round
+    lesson = record_edit_round(project, destination, report)
     return {"round": str(destination), "changes": len(report["changes"]), "comments": len(report["comments"]),
-            "status": report["status"], "warnings": warnings}
+            "status": report["status"], "warnings": warnings, "lesson": lesson}
 
 
 def feedback_context(project: Path) -> dict:

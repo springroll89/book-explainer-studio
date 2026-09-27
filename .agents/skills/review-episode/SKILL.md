@@ -7,7 +7,7 @@ description: 在本书籍精讲项目检查一集稿件的事实、核心收获�
 
 先运行 `./run.sh guard <项目路径> review --ep <集号>`。全季统一改稿模式允许 G2/G3/G4 未批准时完成文字自查和独立审校，不等待逐集人工反馈。草稿报告的 `dependency_hashes` 绑定有效工作连续性中的实际稿件哈希；`final.md` 和 `status: final` 审校仍要求正式前序定稿依赖。前集未齐时如实标记依赖待补，整季初稿交齐前补录并复核。下一步为用户统一修改全部文案。
 
-读取 [上下文管理与跨聊天续接](../../../docs/CONTEXT_MANAGEMENT.md)、[独立审校与通过条件](../../../docs/WORKFLOW.md#独立审校与通过条件)。先运行 `lint`、`quotes`、`check-plan`，随后独立分发给 [fact-checker](../../../roles/fact-checker.md)、[deai-editor](../../../roles/deai-editor.md) 与 [listener](../../../roles/listener.md)。
+读取 [独立审校与通过条件](../../../docs/WORKFLOW.md#独立审校与通过条件)。先运行 `lint`、`quotes`、`check-plan`，随后独立分发给 [fact-checker](../../../roles/fact-checker.md)、[deai-editor](../../../roles/deai-editor.md) 与 [listener](../../../roles/listener.md)。
 
 剧情类的统筹、fact-checker 和 deai-editor 按 [剧情文字总纲](../../../style/narrative_charter.md) 检查场景中的理解、冲突推进和信息揭示；不要因缺少总结性道理判深度不足，也不要为补 takeaways 打断剧情。listener 不接收该总纲或本书写法，继续保持下述隔离。
 

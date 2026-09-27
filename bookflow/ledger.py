@@ -3,9 +3,10 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .common import load_yaml, parse_draft, sha256_file, source_generation, write_yaml
+from .common import load_config, load_yaml, parse_draft, sha256_file, source_generation, write_yaml
 from .quality import lint, verify_quotes
 from .review import evaluate
+from .approvals import confirmation_state
 
 REQUIRED = {
     "revealed": list,
@@ -51,6 +52,8 @@ def _entry(data: dict, ep: int):
 def _problems(project: Path, entry: dict, generation) -> list[str]:
     errors = []
     ep = entry["ep"]
+    if confirmation_state(project, "script", ep)["state"] != "passed":
+        errors.append("本集文案确认已撤回、失效或尚未记录。")
     final = _final(project, ep)
     if entry.get("stale"):
         errors.append(f"本集账本已过期：{entry.get('stale_reason', '')}")
@@ -74,7 +77,8 @@ def _problems(project: Path, entry: dict, generation) -> list[str]:
         if not review_path.is_file() or entry.get("review_sha256") != sha256_file(review_path):
             errors.append("入账时的审校报告已缺失或修改。")
     artifacts = entry.get("review_artifacts", {})
-    for role in ("fact", "listener", "deai"):
+    required_roles = ("fact",) if load_config(project).get("profile") == "story" else ("fact", "listener", "deai")
+    for role in dict.fromkeys((*required_roles, *(artifacts.keys() if isinstance(artifacts, dict) else ()))):
         artifact = artifacts.get(role, {}) if isinstance(artifacts, dict) else {}
         role_name = artifact.get("path")
         role_path = Path(role_name) if role_name else None
@@ -207,6 +211,9 @@ def stamp(project: Path, ep: int, approved_by: str, review_path: Path) -> dict:
         hard_warnings.extend(checked.get("warnings", []))
     if errors:
         return {"passed": False, "errors": errors, "warnings": hard_warnings}
+    if confirmation_state(project, "script", ep)["state"] != "passed":
+        return {"passed": False, "errors": ["本集缺少当前口播稿有效的文案确认记录。"],
+                "warnings": hard_warnings}
     report = load_yaml(review_path, default={})
     verdict = evaluate(project, ep, final, report)
     if not verdict["passed"]:

@@ -1,6 +1,8 @@
 format:
   speech_rate_cpm: 240
   episode_minutes: [10, 15]
+# 未声明档位的旧项目保持原来的精讲检查。
+profile: explainer
 depth:
   required_layers: [2]
   series_layers: [3]
@@ -23,6 +25,9 @@ gates:
   plan: manual
   first_episode: manual
   final: manual
+approvals:
+  verify_transcript: true
+  minor_change_ratio: 0.03
 
 # Compatibility for existing projects; `new` explicitly selects full_season_review.
 drafting:
@@ -55,6 +60,42 @@ visual_pacing:
   overlay: {reading_cps: 4, extra_sec: 1, name_tag_min_sec: 2.5, info_max_chars: 40}
   reveal_cut_tolerance_sec: 0.5
 
+producers:
+  tts: doubao_tts
+  sfx: doubao_audio
+  mix: ffmpeg
+  subs: local
+  render: ffmpeg
+voice_production:
+  output: production/voice.wav
+  timing_output: production/timing.json
+  segments: production/voice_segments.json
+  parts_dir: production/voice_parts
+sfx_production:
+  binding_output: production/sfx_bindings.json
+mix:
+  voice: production/voice.wav
+  timing: production/timing.json
+  cues: production/sound_cues.yaml
+  output: production/final_mix.wav
+  timing_output: production/timing_actual.json
+  max_silence_sec: 3.0
+  timeout_sec: 7200
+subs:
+  timing: production/timing_actual.json
+  audio: production/final_mix.wav
+  output: production/subtitles.srt
+render:
+  storyboard: production/storyboard.yaml
+  audio: production/final_mix.wav
+  subtitles: production/subtitles.srt
+  output: production/final.mp4
+  fps: 25
+  transition: {name: slideleft, duration_sec: 0.4}
+  subtitle_style: {font_name: "PingFang SC", font_size: 36, outline: 2, margin_v: 50}
+  title_card: {required: true, manifest: production/title_card.yaml}
+  timeout_sec: 7200
+
 # O13 声音设计与混音默认值。这里只定义规则与起始参考值，命令不会自行调用付费模型。
 sound_design:
   narration:
@@ -74,8 +115,8 @@ sound_design:
     variants_important: 2
     prompt_suffix: "无人声，无音乐"
   pricing:
-    sfx_model_per_minute: 1.0
-    narration_model_per_minute: null
+    sfx_model_per_minute: null
+    narration_model_per_10k_chars: null
     currency: CNY
   budget_per_episode: 20
   budget_per_13min:

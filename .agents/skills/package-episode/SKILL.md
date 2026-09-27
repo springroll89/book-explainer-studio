@@ -7,9 +7,9 @@ description: 在本书籍精讲项目需要导出某集纯配音稿、制作清�
 
 读取 [打包与真实验收](../../../docs/WORKFLOW.md#打包与真实验收)。
 
-用户要求“全季文案一起修改”时，先按 `drafting.mode: full_season_review` 为每集运行 `edit-copy`，再提供完整目录和合并阅读稿；保留各集原稿快照、独立编辑基线和来源索引。文字编辑包不要求 G2/G3/G4，不以 `export --preview` 的媒体闸门卡住文案交付。用户统一改稿之前，不把这些草稿称为已定稿，也不生成配音、画面或正式发布包。
+用户要求“全季文案一起修改”时，先按 `drafting.mode: full_season_review` 为每集运行 `edit copy`，再提供完整目录和合并阅读稿；保留各集原稿快照、独立编辑基线和来源索引。文字编辑包不要求 G2/G3/G4，不以 `export --preview` 的媒体闸门卡住文案交付。用户统一改稿之前，不把这些草稿称为已定稿，也不生成配音、画面或正式发布包。
 
-打包前运行 `./run.sh names-check <项目路径>`。名称变更后从新版稿重新生成口播、字幕和展示文案；旧音频/视频不能因文字已改就标成已同步。详情见 [名称同步流程](../../../docs/NAME_CONSISTENCY.md)。
+打包前运行 `./run.sh names-check <项目路径>`。名称变更后从新版稿重新生成口播、字幕和展示文案；旧音频/视频不能因文字已改就标成已同步。详情见[名称同步参考](../import-feedback/references/name-consistency.md)。
 
 预览运行 `./run.sh export <稿件路径> --preview --review <汇总路径>`。正式交付先确认本版审校、用户确认与账本依赖有效，再运行 `./run.sh export <定稿路径> --deliver --review <汇总路径>`；开发授权无需重复确认，但不能代替 G4。
 
@@ -19,7 +19,7 @@ description: 在本书籍精讲项目需要导出某集纯配音稿、制作清�
 
 声音规划与纯口播分离：口播和音效都直接走已配置的豆包 API，但使用不同模型。豆包 2.0 只接收 `voiceover.txt` 生成连续口播；豆包 1.0 负责音效、环境声、回声和可复用片头，提示词与落点写入独立的 `production/sound_cues.yaml`（历史 `sound_plan.yaml` 只作迁移依据）。两者共用同一份本地 API 配置，凭据只从环境变量或本机配置读取，不能写入稿件、Skill、日志或交付文案。ChatCut 只负责导入音频、剪辑、混音、字幕、画面和导出，不承担口播或音效生成。
 
-每条声音必须有 `sound_class`（`ambience`、`event`、`process`、`design`、`music`）和 `function`，并记录句子锚点、原文依据、`gap_policy`（`duck`、`gap`、`partial_gap`、`none`）及状态。环境底和音乐默认 `duck`；事件在剧情事件、钩子、揭示处默认 `gap`；过程音默认 `partial_gap`。默认每条素材只生成 1 个版本、调用 API 1 次；短环境声循环，零散事件单独生成后由脚本切片。开头黄金 5 秒禁止可辨认的事件音、撞击、铃声和系列标识；方案明确时可放极轻、低于旁白的连续底层，但不得抢注意力。同一时刻只保留一个前景声音；不得用音效新增原文没有的事实。详见 [口播视频声音制作规范](../../../docs/SOUND_PRODUCTION.md)。
+每条声音必须有 `sound_class`、`function`、句子锚点、来源/制作依据、`gap_policy` 和状态。开场黄金 5 秒不放可辨认事件音；声音需有可辨声源和叙事用途，不能增加原文没有的事实。正式音频生成和绑定的服务状态、授权与验收规则见 [produce-audio](../produce-audio/SKILL.md)。
 
 口播和人物音色以项目级 `production/voice_cast.yaml` 为唯一人工配置来源；人物用 `analysis/characters.yaml` 的稳定 ID。每集提交 TTS 前，批次清单须锁定该表的 revision 与 SHA-256，并核对生成任务的 `speaker`、`resource_id`、模型和采样率。旁白的 voice ID、resource ID、模型和采样率须与 `project.yaml` 一致；不一致时暂停并由协调会话统一修正。跨会话只读音色表；新增角色音色写到各自批次目录的独立请求文件，由协调会话去重、征询用户并更新共享表。主要说话人物必须有专属确认音色；次要人物可使用已确认的共用音色池。不得让两个会话分别给同一角色定出不同音色。
 

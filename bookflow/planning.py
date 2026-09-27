@@ -166,6 +166,7 @@ def check_plan(project: Path) -> dict:
     project = Path(project)
     errors, warnings = [], []
     cfg = load_config(project)
+    story = cfg.get("profile") == "story"
     paragraphs, chapters = read_paragraphs(project), read_chapters(project)
     chapter_map = {chapter["id"]: chapter for chapter in chapters}
     data = load_yaml(project / "plan" / "episodes.yaml", {})
@@ -178,9 +179,10 @@ def check_plan(project: Path) -> dict:
     depth = cfg.get("depth", {})
     required_layers = depth.get("required_layers", [2])
     series_required = depth.get("series_layers", [3])
-    for name, values in (("required_layers", required_layers), ("series_layers", series_required)):
-        if not isinstance(values, list) or any(type(value) is not int or value not in LAYERS for value in values):
-            errors.append(f"depth.{name} 必须是 1–4 的整数列表")
+    if not story:
+        for name, values in (("required_layers", required_layers), ("series_layers", series_required)):
+            if not isinstance(values, list) or any(type(value) is not int or value not in LAYERS for value in values):
+                errors.append(f"depth.{name} 必须是 1–4 的整数列表")
     required_layers = set(required_layers) if isinstance(required_layers, list) and all(type(v) is int for v in required_layers) else set()
     series_required = set(series_required) if isinstance(series_required, list) and all(type(v) is int for v in series_required) else set()
     formatting = cfg.get("format", {})
@@ -211,10 +213,13 @@ def check_plan(project: Path) -> dict:
         if episode.get("genre_mode") not in genres:
             errors.append(f"{tag} genre_mode 必须是 {', '.join(sorted(genres))} 之一")
         target = episode.get("target_chars")
-        if not _positive_number(target):
+        if target is None and story:
+            pass
+        elif not _positive_number(target):
             errors.append(f"{tag} target_chars 必须是正数")
         elif valid_budget and not limits[0] * cpm * 0.95 <= target <= limits[1] * cpm * 1.05:
-            errors.append(f"{tag} target_chars={target} 不在 {limits[0]}–{limits[1]} 分钟字数预算内")
+            (warnings if story else errors).append(
+                f"{tag} target_chars={target} 不在 {limits[0]}–{limits[1]} 分钟字数预算内")
         covers = _strings(episode.get("covers"), f"{tag} covers", errors)
         if not covers:
             errors.append(f"{tag} covers 不能为空")
@@ -231,7 +236,9 @@ def check_plan(project: Path) -> dict:
                 except (ValueError, TypeError, KeyError) as error:
                     errors.append(f"{tag} covers {ref} 无效：{error}")
         takeaways = episode.get("takeaways")
-        if not isinstance(takeaways, list) or not takeaways:
+        if takeaways is None and story:
+            takeaways = []
+        elif not isinstance(takeaways, list) or (not takeaways and not story):
             errors.append(f"{tag} takeaways 必须是非空列表")
             takeaways = []
         layers: set[int] = set()
@@ -256,7 +263,9 @@ def check_plan(project: Path) -> dict:
             if core:
                 core_count += 1
             layer = item.get("layer")
-            if type(layer) is not int or layer not in LAYERS:
+            if layer is None and story:
+                pass
+            elif type(layer) is not int or layer not in LAYERS:
                 errors.append(f"{tag} takeaway {tid} layer 必须是 1–4")
             elif core:
                 layers.add(layer)
@@ -265,9 +274,9 @@ def check_plan(project: Path) -> dict:
                 errors.append(f"{tag} takeaway {tid} 缺少 evidence 列表")
             else:
                 errors.extend(f"{tag} takeaway {tid}：{error}" for error in validate_evidence(evidence, paragraphs, external))
-        if not core_count:
+        if not story and not core_count:
             errors.append(f"{tag} 至少需要一条 core: true 的核心 takeaway")
-        if required_layers - layers:
+        if not story and required_layers - layers:
             errors.append(f"{tag} 核心 takeaways 缺少深度层 {sorted(required_layers - layers)}")
         series_layers.update(layers)
         for field, mapping in (("threads_setup", setup_episodes), ("threads_payoff", payoff_episodes)):
@@ -284,7 +293,7 @@ def check_plan(project: Path) -> dict:
             warnings.append(f"{tag} 非末集，未填写 cliffhanger")
         if number > 1 and not episode.get("recap"):
             warnings.append(f"{tag} 未填写前情回顾 recap")
-    if series_required - series_layers:
+    if not story and series_required - series_layers:
         errors.append(f"系列核心 takeaways 缺少深度层 {sorted(series_required - series_layers)}")
     for thread in threads:
         tid = thread["id"]

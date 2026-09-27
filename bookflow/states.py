@@ -1,13 +1,12 @@
 """Derive project status from files, checks and approval records."""
 from __future__ import annotations
 from pathlib import Path
-from .common import full_season_review, load_yaml, parse_draft, sha256_file, source_generation, write_yaml
+from .common import full_season_review, latest_draft, load_yaml, parse_draft, sha256_file, source_generation, write_yaml
 from .approvals import gate_state, list_valid
 from .quality import lint, verify_quotes
 
 def _latest(epdir:Path):
-    drafts=sorted(epdir.glob('draft_v*.md'), key=lambda p:int(p.stem.split('_v')[-1]) if '_v' in p.stem and p.stem.split('_v')[-1].isdigit() else 0)
-    return drafts[-1] if drafts else None
+    return latest_draft(epdir)
 
 def derive(project:Path)->dict:
     p=Path(project); source=source_generation(p); batch=full_season_review(p)
