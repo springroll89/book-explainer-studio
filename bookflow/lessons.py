@@ -238,8 +238,9 @@ def report(project: Path) -> dict:
     for row in _load(path):
         proposal = row.get("proposal") if isinstance(row.get("proposal"), dict) else {}
         check = proposal.get("check")
-        missing_check = (isinstance(check, str) and check.startswith("tests/")
-                         and not (root / check).is_file())
+        missing_check = (isinstance(check, str) and
+                         (check.startswith("tests/") or check.startswith(".venv/bin/python -m unittest "))
+                         and _check_command(root, check) is None)
         if row.get("status") == "applied" and (check in (None, "", "unverified") or missing_check):
             pending.append({"id": row.get("id"), "destination": proposal.get("destination"),
                             "commit": row.get("commit"), "check": "unverified" if not missing_check else check,
@@ -267,6 +268,19 @@ def _git_blob(root: Path, revision: str, destination: str, *, allow_missing: boo
     return result.stdout
 
 
+def _check_command(root: Path, check: str) -> list[str] | None:
+    if check == "selftest":
+        return [sys.executable, "-m", "bookflow", "selftest"]
+    if re.fullmatch(r"tests/test_[A-Za-z0-9_]+\.py", check) and (root / check).is_file():
+        return [sys.executable, "-m", "unittest", check[:-3].replace("/", ".")]
+    parts = check.split()
+    if (parts[:3] == [".venv/bin/python", "-m", "unittest"] and len(parts) > 3
+            and all(re.fullmatch(r"tests\.test_[A-Za-z0-9_]+", module) for module in parts[3:])
+            and all((root / (module.replace(".", "/") + ".py")).is_file() for module in parts[3:])):
+        return [sys.executable, "-m", "unittest", *parts[3:]]
+    return None
+
+
 def _verify_workspace(root: Path, project: Path, check: str, target: Path) -> list[str]:
     """Run the proposed check, the full suite, hygiene, and the current selftest."""
     from .hygiene import audit
@@ -274,12 +288,10 @@ def _verify_workspace(root: Path, project: Path, check: str, target: Path) -> li
         return ["共享层卫生检查未通过；修改已恢复，先核对书目词或路径泄漏"]
     commands = []
     if check != "unverified":
-        if check == "selftest":
-            commands.append([sys.executable, "-m", "bookflow", "selftest"])
-        elif re.fullmatch(r"tests/test_[A-Za-z0-9_]+\.py", check) and (root / check).is_file():
-            commands.append([sys.executable, "-m", "unittest", check[:-3].replace("/", ".")])
-        else:
-            return ["提案检查必须是存在的 tests/test_*.py、自检 selftest 或 unverified"]
+        command = _check_command(root, check)
+        if command is None:
+            return ["提案检查必须是存在的 tests/test_*.py、本地 unittest 模块列表、自检 selftest 或 unverified"]
+        commands.append(command)
     commands.extend(([sys.executable, "-m", "unittest", "discover", "-s", "tests"],
                      [sys.executable, "-m", "bookflow", "selftest"]))
     for command in commands:

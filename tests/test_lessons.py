@@ -2,12 +2,13 @@
 import tempfile
 import unittest
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
 from bookflow.__main__ import parser
 from bookflow.common import write_yaml
-from bookflow.lessons import accept, apply, inbox, observe, propose, report, revert, safe_error, triage
+from bookflow.lessons import _check_command, accept, apply, inbox, observe, propose, report, revert, safe_error, triage
 
 
 class LessonsTests(unittest.TestCase):
@@ -112,6 +113,18 @@ class LessonsTests(unittest.TestCase):
         self.assertNotIn("private-value", cleaned)
         self.assertNotIn("abcdef123", cleaned)
         self.assertNotIn("tester", cleaned)
+
+    def test_check_command_accepts_only_existing_local_unittest_modules(self):
+        tests = self.root / "tests"
+        tests.mkdir()
+        (tests / "test_story_profile.py").write_text("", encoding="utf-8")
+        (tests / "test_lessons.py").write_text("", encoding="utf-8")
+        check = ".venv/bin/python -m unittest tests.test_story_profile tests.test_lessons"
+        self.assertEqual(_check_command(self.root, check),
+                         [sys.executable, "-m", "unittest", "tests.test_story_profile", "tests.test_lessons"])
+        self.assertIsNone(_check_command(self.root, check + " --failfast"))
+        self.assertIsNone(_check_command(self.root, ".venv/bin/python -m unittest tests.test_missing"))
+        self.assertIsNone(_check_command(self.root, "python -c print(1)"))
 
     def git(self, *args):
         return subprocess.run(["git", *args], cwd=self.root, capture_output=True,
