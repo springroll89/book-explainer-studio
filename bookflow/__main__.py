@@ -621,7 +621,9 @@ def main() -> int:
     args = parser().parse_args()
     try:
         result = dispatch(args)
-        if isinstance(result, dict) and (result.get("errors") or result.get("passed") is False):
+        if (isinstance(result, dict) and (result.get("errors") or result.get("passed") is False)
+                and not (args.command == "voices" and args.action == "check"
+                         and result.get("status") == "warning")):
             lesson = _record_cli_failure(args, "；".join(map(str, result.get("errors") or [result.get("summary", "命令失败")])))
             if lesson is not None:
                 result["lesson_intake"] = lesson

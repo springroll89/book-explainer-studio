@@ -62,3 +62,5 @@
 - 2026-09-27：新增阶段统一 `check <项目>`，按 `next` 的阶段组合原文查漏、计划、初稿、译名、前情、定稿审校与媒体/归档检查；拆书阶段重生成机器查漏报告且不覆盖人工审阅，其他阶段只读。旧单项命令暂保留，尚未完成 15 命令收敛。
 
 - L20260927-01：更新 `style/story_craft.md`；检查：`.venv/bin/python -m unittest tests.test_story_profile tests.test_lessons`。
+
+- L20260927-03：更新 `bookflow/__main__.py`；检查：`tests/test_lessons.py`。
