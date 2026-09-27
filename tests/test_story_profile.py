@@ -13,6 +13,45 @@ from bookflow.selftest import run as selftest_run
 
 
 class StoryProfileTests(unittest.TestCase):
+    def test_sentence_exception_requires_exact_sentence_and_audio(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            write_yaml(project / "project.yaml", {"profile": "story", "book": {"title": "夹具"}})
+            sentence = "他沿着走廊继续往前走，" * 7 + "终于停在门前。"
+            draft = project / "episodes/ep01/draft_v1.md"
+            atomic_write(draft, f"---\nepisode: 1\n---\n{sentence}\n")
+            audio = project / "episodes/ep01/production/audio/voice.mp3"
+            audio.parent.mkdir(parents=True)
+            audio.write_bytes(b"original audio")
+            row = {"id": "EP01-S001", "episode": 1, "sentence_id": "s001",
+                   "sentence": sentence, "audio": str(audio.relative_to(project)),
+                   "audio_sha256": sha256_file(audio), "evidence": "user-message:123"}
+            exceptions = project / "feedback/sentence_exceptions.yaml"
+            write_yaml(exceptions, {"exceptions": [row]})
+            self.assertTrue(lint(draft)["passed"])
+            self.assertIn("sentence_exception", [item["rule"] for item in lint(draft)["items"]])
+            audio.write_bytes(b"changed audio")
+            self.assertIn("sentence", [item["rule"] for item in lint(draft)["items"]])
+            audio.write_bytes(b"original audio")
+            atomic_write(draft, f"---\nepisode: 1\n---\n{sentence[:-1]}！\n")
+            self.assertIn("sentence", [item["rule"] for item in lint(draft)["items"]])
+            atomic_write(project / "episodes/ep02/draft_v1.md", f"---\nepisode: 2\n---\n{sentence}\n")
+            self.assertIn("sentence", [item["rule"] for item in lint(project / "episodes/ep02/draft_v1.md")["items"]])
+
+    def test_spoken_circle_zero_blocks_lint_but_metadata_does_not(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            write_yaml(project / "project.yaml", {"profile": "story", "book": {"title": "夹具"}})
+            draft = project / "episodes/ep01/draft_v1.md"
+            atomic_write(draft, "---\nepisode: 1\nnote: 二〇二四\n---\n二〇二四年，他回来。\n")
+            invalid = lint(draft)
+            self.assertEqual([item["line"] for item in invalid["items"]
+                              if item["rule"] == "year_zero_pronunciation"], [5])
+            atomic_write(draft, "---\nepisode: 1\nnote: 二〇二四\n---\n二零二四年，他回来。\n")
+            corrected = lint(draft)
+            self.assertTrue(corrected["passed"], corrected)
+            self.assertNotIn("year_zero_pronunciation", [item["rule"] for item in corrected["items"]])
+
     def test_story_audit_can_select_current_drafts_before_final_approval(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)

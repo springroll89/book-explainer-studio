@@ -36,6 +36,13 @@ class LessonsTests(unittest.TestCase):
         self.assertEqual(report["status"], "warning")
         self.assertEqual(inbox(self.project)["items"], [])
 
+    def test_future_books_pronunciation_rule_is_registered_for_triage(self):
+        quote = "后续写稿的部分，这个规则也要写进去，后续的书都要这样不要用〇"
+        report = observe(self.project, quote, "chat:test-future-books")
+        self.assertTrue(report["passed"])
+        self.assertEqual(inbox(self.project)["items"][0]["quote"], quote)
+        self.assertEqual(triage(self.project)["items"][0]["suggested_scope"], "general_candidate")
+
     def test_triage_lists_candidates_without_claiming_approval(self):
         observe(self.project, "所有书以后都这样检查。", "chat:test-message-3")
         report = triage(self.project)

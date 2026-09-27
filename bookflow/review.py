@@ -109,7 +109,7 @@ def evaluate(project: Path, ep: int, draft: Path, report: dict) -> dict:
             from .continuity import context
             continuity = context(project, ep)
             working_dependencies = {e['ep']: e.get('final_sha256') if e['basis']=='ledger' else e.get('draft_sha256') for e in continuity['episodes']}
-            warnings.append('本次为全季文字草稿审校，使用有效工作连续性；不代表 G3/G4 已批准。')
+            warnings.append('本次为全季文字草稿审校，使用有效工作连续性；不代表文案已确认。')
         errors.extend(continuity['errors'])
         result['review_mode'] = 'full_season_draft'
     errors.extend(_snapshot_errors(project, ep, draft_hash, generation, report, "审校汇总", working_dependencies))

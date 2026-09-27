@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .common import (PROD, ROOT, count_chars, expand_evidence, find_project, fmt_time,
                      latest_draft, load_config, load_yaml, parse_draft, read_paragraphs,
-                     source_generation, validate_evidence)
+                     sha256_file, source_generation, validate_evidence)
 from .sentences import parse_draft_file
 
 LONG_DESCRIPTOR = re.compile(
@@ -42,6 +42,37 @@ def _book_rule_scope(rule: dict, ep: int) -> bool:
     if applies == "all" and not re.search(r"全季|所有|以后|每一集|每集|每次|全部", str(rule["scope_evidence"])):
         raise ValueError("全季 lint 规则的原话依据没有明确全季或以后适用意图")
     return targets is None or ep in targets
+
+
+def _sentence_exception(project: Path | None, path: Path, sentence: dict) -> str | None:
+    if project is None:
+        return None
+    match = re.fullmatch(r"ep0*([1-9][0-9]*)", path.parent.name)
+    if not match:
+        return None
+    data = load_yaml(project / "feedback/sentence_exceptions.yaml", {}) or {}
+    rows = data.get("exceptions", []) if isinstance(data, dict) else []
+    if not isinstance(rows, list):
+        return None
+    for row in rows:
+        if (not isinstance(row, dict) or type(row.get("episode")) is not int
+                or row["episode"] != int(match.group(1))
+                or row.get("sentence_id") != sentence["id"]
+                or row.get("sentence") != sentence["text"]
+                or not isinstance(row.get("id"), str) or not row["id"].strip()
+                or not isinstance(row.get("evidence"), str) or not row["evidence"].strip()
+                or not isinstance(row.get("audio"), str) or not row["audio"].strip()
+                or not isinstance(row.get("audio_sha256"), str)
+                or not re.fullmatch(r"[0-9a-f]{64}", row["audio_sha256"])):
+            continue
+        audio = Path(row["audio"])
+        if audio.is_absolute():
+            continue
+        audio_path = (project / audio).resolve()
+        if (audio_path.is_relative_to(project.resolve()) and audio_path.is_file()
+                and sha256_file(audio_path) == row["audio_sha256"]):
+            return row["id"]
+    return None
 
 
 def lint(path: Path) -> dict:
@@ -79,8 +110,14 @@ def lint(path: Path) -> dict:
     for sentence in draft["sentences"]:
         n, text, line = sentence["chars"], sentence["text"], sentence["line"]
         lengths.append(n)
+        if "〇" in text:
+            add("error", "year_zero_pronunciation", "口播中的“〇”请写作“零”，避免年份被配音误读", line)
         if n > rules.get("sentence_error", 55):
-            add("error", "sentence", f"单句 {n} 字：{text[:36]}", line)
+            exception = _sentence_exception(project, path, sentence)
+            if exception:
+                add("warn", "sentence_exception", f"单句 {n} 字，按 {exception} 保留，仍需人工试听：{text[:36]}", line)
+            else:
+                add("error", "sentence", f"单句 {n} 字：{text[:36]}", line)
         elif n > rules.get("sentence_warn", 35):
             add("warn", "sentence", f"单句 {n} 字，建议拆开", line)
         if any(count_chars(part) > rules.get("clause_warn", 20) for part in re.split(r"[，,:：；;、]", text)):

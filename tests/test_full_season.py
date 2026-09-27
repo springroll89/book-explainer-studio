@@ -139,7 +139,7 @@ class FullSeasonTests(unittest.TestCase):
         self.assertTrue(any('统一阅读' in item for item in result['awaiting_human']))
         self.assertFalse(any('G3' in item for item in result['awaiting_human']))
         self.assertFalse(any('on_hold' in item['flags'] for item in result['episodes']))
-        self.assertEqual(result['gates']['G3'], 'pending')
+        self.assertEqual(result['confirmations']['script'], {'1': 'pending', '2': 'pending', '3': 'pending'})
 
     def test_status_stops_waiting_for_season_review_after_user_marks_it_complete(self):
         for ep in range(1, 4):

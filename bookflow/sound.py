@@ -476,7 +476,7 @@ def mix(epdir: Path) -> dict[str, Any]:
     if not voice.exists(): assemble(epdir)
     out = audio_dir / "mix_rough.wav"
     subprocess.run(["ffmpeg", "-y", "-i", str(voice), "-af", "loudnorm=I=-15:TP=-1.0:LRA=7", "-ar", "48000", "-c:a", "pcm_s24le", str(out)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return {"passed": True, "mix_rough": str(out), "sfx_tracks": 0, "note": "当前仅输出旁白标准化粗混；音效轨待 AV1 参数确认后加入。"}
+    return {"passed": True, "mix_rough": str(out), "sfx_tracks": 0, "note": "当前仅输出旁白标准化粗混；音效轨尚未加入。"}
 
 
 def baseline(epdir: Path) -> dict[str, Any]:

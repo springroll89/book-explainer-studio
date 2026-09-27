@@ -323,7 +323,7 @@ def parser() -> argparse.ArgumentParser:
         if action == "mark-stale":
             q.add_argument("--reason", required=True)
         if action == "stamp":
-            q.add_argument("--approved-by", help="兼容旧接口；新流程只认 approvals/G4 记录")
+            q.add_argument("--approved-by", help="兼容旧接口，仅记录确认者名称；仍须有效文案确认")
             q.add_argument("--review", type=Path, required=True)
     return p
 
@@ -546,14 +546,7 @@ def dispatch(args) -> dict | str:
             return ledger.context(args.project, args.ep)
         if args.action == "mark-stale":
             return ledger.mark_stale(args.project, args.ep, args.reason)
-        if not args.approved_by:
-            from .approvals import gate_state, list_valid
-            if gate_state(args.project, "G4", args.ep) != "passed":
-                return {"passed": False, "errors": ["缺少当前 final.md 哈希一致的 G4 用户批准记录"]}
-            approved = next((x.get("approver") for x in list_valid(args.project) if x.get("gate")=="G4" and x.get("ep")==args.ep and x.get("valid")), "本机用户")
-        else:
-            approved = args.approved_by
-        return ledger.stamp(args.project, args.ep, approved, args.review)
+        return ledger.stamp(args.project, args.ep, args.approved_by or "本机用户", args.review)
     if cmd == "export":
         return export_episode(args.draft, args.preview, args.review)
     if cmd == "status":

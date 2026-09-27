@@ -14,8 +14,8 @@ from .common import atomic_write, load_yaml, write_yaml
 
 SOURCES = {"user_message", "edit_round", "rework", "script_error"}
 KINDS = {"book_fact", "book_style", "general_craft", "process_bug", "one_off"}
-TRIGGERS = re.compile(r"不对|改成|别再|不要再|记住|以后|所有书|每次|这类|更新\s*skill", re.I)
-GENERAL = re.compile(r"以后|所有书|每次|这类|skill", re.I)
+TRIGGERS = re.compile(r"不对|改成|别再|不要再|不要用|统一写作|记住|以后|所有书|后续的书|每次|这类|更新\s*skill", re.I)
+GENERAL = re.compile(r"以后|所有书|后续的书|每次|这类|skill", re.I)
 
 
 def safe_error(message: str) -> str:

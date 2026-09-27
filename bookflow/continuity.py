@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from .common import full_season_review, load_yaml, parse_draft, sha256_file, source_generation, write_yaml
 from .ledger import check as ledger_check
-from .approvals import gate_state
 
 def _path(project): return Path(project)/'episodes/working_continuity.yaml'
 def _load(project):
@@ -42,7 +41,7 @@ def context(project,ep,allow_missing=False):
  if type(ep) is not int or ep<1: return {'passed':False,'errors':['集号必须为正整数'],'episodes':[],'warnings':[]}
  ledger_states={x['ep']:x['passed'] for x in ledger_check(p).get('episodes',[])} if le else {}
  for n in range(1,ep):
-  if n in le and ledger_states.get(n) and gate_state(p,'G4',n)=='passed':
+  if n in le and ledger_states.get(n):
    result.append({'ep':n,'basis':'ledger',**le[n]}); continue
   e=next((x for x in d['episodes'] if isinstance(x,dict) and x.get('ep')==n),None)
   if not e:

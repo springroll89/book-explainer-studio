@@ -4,7 +4,10 @@ import unittest
 from pathlib import Path
 
 from bookflow import ledger, review
+from bookflow.__main__ import dispatch, parser
 from bookflow.approvals import record_confirmation
+from bookflow.continuity import context as working_context
+from bookflow.states import derive as status
 from bookflow.common import atomic_write, load_yaml, parse_draft, sha256_file, write_json, write_yaml
 from bookflow.quality import lint, verify_quotes
 
@@ -15,6 +18,7 @@ class LedgerReviewTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.project = Path(self.temp.name)
         self.cfg = {
+            "approvals": {"test_fixture_only": True},
             "review": {"hook_fulfil_min": 0.6, "max_p1": 3},
             "format": {"episode_minutes": [0.01, 1]},
             "quote": {"max_ratio": 0.5},
@@ -92,6 +96,59 @@ class LedgerReviewTests(unittest.TestCase):
         result = ledger.stamp(self.project, 1, "测试确认者", self.save_review(1))
         self.assertFalse(result["passed"])
         self.assertIn("文案确认", "；".join(result["errors"]))
+
+    def test_cli_stamp_uses_script_confirmation_without_legacy_record(self):
+        approved = record_confirmation(self.project, "script", "拍板文案", [1],
+                                       session="selftest-fixture", verify_transcript=False)
+        self.assertTrue(approved["passed"], approved)
+        args = parser().parse_args(["ledger", "stamp", str(self.project), "1",
+                                    "--review", str(self.save_review(1))])
+        result = dispatch(args)
+        self.assertTrue(result["passed"], result)
+        self.assertTrue(ledger.context(self.project, 2)["passed"])
+        self.assertEqual(status(self.project)["episodes"][0]["status"], "ledgered")
+
+    def test_cli_reviewer_name_cannot_replace_or_revive_confirmation(self):
+        for state in ("pending", "revoked", "invalidated"):
+            if state != "pending":
+                record_confirmation(self.project, "script", "拍板文案", [1],
+                                    session="selftest-fixture", verify_transcript=False)
+            if state == "revoked":
+                record_confirmation(self.project, "script", "撤回文案", [1],
+                                    session="selftest-fixture", verify_transcript=False)
+            elif state == "invalidated":
+                final = self.paths[1]
+                atomic_write(final, final.read_text(encoding="utf-8") + "\n他走了。\n")
+            review_path = self.save_review(1)
+            for name in ([], ["--approved-by", "测试确认者"]):
+                with self.subTest(state=state, name=name):
+                    args = parser().parse_args(["ledger", "stamp", str(self.project), "1",
+                                                "--review", str(review_path), *name])
+                    result = dispatch(args)
+                    self.assertFalse(result["passed"], result)
+                    self.assertIn("文案确认", "；".join(result["errors"]))
+                    self.assertNotIn("final_sha256", ledger._load(self.project)["episodes"][0])
+
+    def test_working_context_uses_current_ledger_and_rejects_revocation(self):
+        self.stamp(1)
+        current = working_context(self.project, 2)
+        self.assertTrue(current["complete"], current)
+        self.assertEqual(current["sources"], [{"ep": 1, "source": "ledger"}])
+        record_confirmation(self.project, "script", "撤回文案", [1],
+                            session="selftest-fixture", verify_transcript=False)
+        self.assertFalse(working_context(self.project, 2)["passed"])
+        item = status(self.project)["episodes"][0]
+        self.assertEqual(item["status"], "final_candidate")
+        self.assertIn("needs_recheck", item["flags"])
+
+    def test_working_context_rejects_changed_confirmed_final(self):
+        self.stamp(1)
+        final = self.paths[1]
+        atomic_write(final, final.read_text(encoding="utf-8") + "\n他走了。\n")
+        self.assertFalse(working_context(self.project, 2)["passed"])
+        item = status(self.project)["episodes"][0]
+        self.assertNotEqual(item["status"], "ledgered")
+        self.assertEqual(item["confirmations"]["script"], "invalidated")
 
     def test_missing_review_cannot_stamp(self):
         result = ledger.stamp(self.project, 1, "测试确认者", self.project / "missing.yaml")
