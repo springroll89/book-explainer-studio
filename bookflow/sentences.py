@@ -4,7 +4,7 @@ from pathlib import Path
 from .common import parse_draft, sha256_file, write_json
 
 def _norm(text): return re.sub(r'\s+','',text).strip()
-def generate(draft:Path, previous:Path|None=None)->dict:
+def generate(draft:Path, previous:Path|None=None, *, write_mapping:bool=True)->dict:
  draft=Path(draft); parsed=parse_draft(draft.read_text(encoding='utf-8')); old=[]
  if previous:
   op=Path(previous).with_suffix('.sentences.json')
@@ -43,6 +43,49 @@ def generate(draft:Path, previous:Path|None=None)->dict:
     mapping.append({'old_id':o.get('id'),'new_id':rows[ni+1]['id'],'relation':'split'})
  out={'draft':str(draft),'draft_sha256':sha256_file(draft),'sentences':rows}
  write_json(draft.with_suffix('.sentences.json'),out)
- if previous:
+ if previous and write_mapping:
   stem=f'sentence_map_{Path(previous).stem}_to_{draft.stem}.json'; write_json(draft.parent/stem,{'from':str(previous),'to':str(draft),'mapping':mapping})
  return {'passed':True,'sentences':len(rows),'mapping':mapping,'output':str(draft.with_suffix('.sentences.json'))}
+
+
+def _previous_version(draft: Path) -> Path | None:
+    if draft.name == "final.md":
+        from .common import latest_draft
+        return latest_draft(draft.parent)
+    match = re.fullmatch(r"draft_v(\d+)\.md", draft.name)
+    if not match:
+        return None
+    number = int(match.group(1))
+    candidates = [(int(m.group(1)), path) for path in draft.parent.glob("draft_v*.md")
+                  if (m := re.fullmatch(r"draft_v(\d+)\.md", path.name)) and int(m.group(1)) < number]
+    return max(candidates, default=(0, None), key=lambda item: item[0])[1]
+
+
+def parse_draft_file(draft: Path) -> dict:
+    """Parse a saved script with its stable sentence IDs, creating a missing table."""
+    import json
+
+    draft = Path(draft)
+    parsed = parse_draft(draft.read_text(encoding="utf-8"))
+    sidecar = draft.with_suffix(".sentences.json")
+    if not sidecar.is_file():
+        generate(draft, _previous_version(draft))
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    stable = data.get("sentences", [])
+    stale = data.get("draft_sha256") and data["draft_sha256"] != sha256_file(draft)
+    mismatched = len(stable) != len(parsed["sentences"]) or any(
+        row.get("text") != provisional["text"] or not row.get("id")
+        for row, provisional in zip(stable, parsed["sentences"])
+    )
+    if stale or mismatched:
+        generate(draft, draft, write_mapping=False)
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+        stable = data.get("sentences", [])
+        if len(stable) != len(parsed["sentences"]):
+            raise ValueError(f"稳定句子表与稿件不一致：{sidecar}")
+    mapping = {provisional["id"]: row["id"] for provisional, row in zip(parsed["sentences"], stable)}
+    for provisional, row in zip(parsed["sentences"], stable):
+        provisional["id"] = row["id"]
+    for hook in parsed["hooks"]:
+        hook["sentence_id"] = mapping.get(hook["sentence_id"], "")
+    return parsed

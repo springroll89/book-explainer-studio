@@ -1,0 +1,16 @@
+# 16 份经授权修正的剧情工作稿口播统计；批次未获人工定稿批准。
+# 这里只保存聚合指标，不保存书名、人物、句子或本机路径。候选阈值仅供提醒。
+status: provisional_not_user_approved
+sample_episodes: 16
+dialogue_ratio:
+  observed_min: 0.0617
+  observed_median: 0.1097
+  observed_max: 0.2552
+  warn_below: 0.06
+episode_chars:
+  observed_min: 2247
+  observed_median: 2454
+  observed_max: 2689
+  observed_cv: 0.0497
+  # 低于已观察全季变异系数约八成时仅提醒；基线仍待人工确认。
+  uniform_warn_below: 0.04

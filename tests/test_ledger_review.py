@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from bookflow import ledger, review
+from bookflow.approvals import record_confirmation
 from bookflow.common import atomic_write, load_yaml, parse_draft, sha256_file, write_json, write_yaml
 from bookflow.quality import lint, verify_quotes
 
@@ -75,6 +76,9 @@ class LedgerReviewTests(unittest.TestCase):
         return path
 
     def stamp(self, ep):
+        approved = record_confirmation(self.project, "script", "拍板文案", [ep],
+                                       session="selftest-fixture", verify_transcript=False)
+        self.assertTrue(approved["passed"], approved)
         result = ledger.stamp(self.project, ep, "测试确认者", self.save_review(ep))
         self.assertTrue(result["passed"], result)
         return result
@@ -83,6 +87,11 @@ class LedgerReviewTests(unittest.TestCase):
         result = ledger.stamp(self.project, 1, " ", self.save_review(1))
         self.assertFalse(result["passed"])
         self.assertNotIn("final_sha256", ledger._load(self.project)["episodes"][0])
+
+    def test_named_reviewer_without_script_confirmation_cannot_stamp(self):
+        result = ledger.stamp(self.project, 1, "测试确认者", self.save_review(1))
+        self.assertFalse(result["passed"])
+        self.assertIn("文案确认", "；".join(result["errors"]))
 
     def test_missing_review_cannot_stamp(self):
         result = ledger.stamp(self.project, 1, "测试确认者", self.project / "missing.yaml")
@@ -169,6 +178,21 @@ class LedgerReviewTests(unittest.TestCase):
         report = self.report(1)
         report["reviewers"]["listener"]["independent"] = False
         self.assertFalse(review.evaluate(self.project, 1, self.paths[1], report)["passed"])
+
+    def test_explainer_fact_only_passes_review_and_legacy_ledger_by_default(self):
+        report = self.report(1)
+        report["reviewers"] = {"fact": report["reviewers"]["fact"]}
+        report.pop("listener")
+        self.assertTrue(review.evaluate(self.project, 1, self.paths[1], report)["passed"])
+        record_confirmation(self.project, "script", "拍板文案", [1], verify_transcript=False)
+        stamped = ledger.stamp(self.project, 1, "测试确认者", self.save_review(1, report))
+        self.assertTrue(stamped["passed"], stamped)
+        self.assertTrue(ledger.context(self.project, 2)["passed"])
+        self.cfg["review"]["listener_enabled"] = True
+        self.cfg["review"]["deai_enabled"] = True
+        write_yaml(self.project / "project.yaml", self.cfg)
+        self.assertFalse(review.evaluate(self.project, 1, self.paths[1], report)["passed"])
+        self.assertFalse(ledger.context(self.project, 2)["passed"])
 
     def test_missing_predecessor_blocks_context(self):
         self.assertFalse(ledger.context(self.project, 2)["passed"])

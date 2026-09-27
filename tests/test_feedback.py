@@ -1,13 +1,17 @@
+import io
 import json
 import tempfile
 import unittest
 import zipfile
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
 from xml.etree import ElementTree as ET
 
 from bookflow import feedback
+from bookflow.__main__ import dispatch, parser
 from bookflow.common import atomic_write, write_yaml
+from bookflow.lessons import inbox
 
 
 class FeedbackTests(unittest.TestCase):
@@ -34,6 +38,52 @@ class FeedbackTests(unittest.TestCase):
         report = json.loads((Path(result["round"]) / "diff.json").read_text())
         self.assertEqual(report["edited_file_sha256"], feedback.sha256_file(edited))
         self.assertTrue((Path(result["round"]) / "edited.md").is_file())
+        lessons = inbox(self.project)["items"]
+        self.assertEqual(len(lessons), 1)
+        self.assertEqual(lessons[0]["source"], "edit_round")
+        self.assertEqual(lessons[0]["quote"], "")
+        self.assertIn("feedback/rounds/", lessons[0]["evidence"])
+        self.assertEqual(feedback.import_edits(edited, self.baseline)["status"], "already_imported")
+        self.assertEqual(len(inbox(self.project)["items"]), 1)
+
+    def test_edit_cli_round_trip_and_dev_compatibility(self):
+        original = self.draft.read_bytes()
+        copy_dir = self.draft.parent / "human_edit/cli"
+        copied = dispatch(parser().parse_args(["edit", "copy", str(self.draft),
+                                               "--output", str(copy_dir)]))
+        self.assertTrue(Path(copied["markdown"]).is_file())
+        self.assertNotIn("docx", copied)
+        edited = self.root / "cli-edited.md"
+        atomic_write(edited, Path(copied["markdown"]).read_text(encoding="utf-8")
+                     .replace("他拿起钥匙。", "他攥紧钥匙。"))
+        imported = dispatch(parser().parse_args(["edit", "import", str(edited),
+                                                 "--baseline", copied["baseline"]]))
+        self.assertEqual(imported["changes"], 1)
+        self.assertTrue((Path(imported["round"]) / "diff.json").is_file())
+        self.assertEqual(self.draft.read_bytes(), original)
+
+        legacy_dir = self.draft.parent / "human_edit/dev-cli"
+        legacy = dispatch(parser().parse_args(["dev", "edit-copy", str(self.draft),
+                                               "--output", str(legacy_dir)]))
+        self.assertTrue(Path(legacy["markdown"]).is_file())
+        repeated = dispatch(parser().parse_args(["dev", "import-edits", str(edited),
+                                                 "--baseline", copied["baseline"]]))
+        self.assertEqual(repeated["status"], "already_imported")
+        for old_command in ("edit-copy", "import-edits"):
+            with self.subTest(old_command=old_command):
+                with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+                    parser().parse_args([old_command])
+                self.assertEqual(error.exception.code, 2)
+
+    def test_lessons_context_replaces_feedback_context(self):
+        with patch.object(feedback, "ROOT", self.root):
+            current = dispatch(parser().parse_args(["lessons", "context", str(self.project)]))
+            legacy = dispatch(parser().parse_args(["dev", "feedback-context", str(self.project)]))
+        self.assertEqual(current, legacy)
+        self.assertIn("active_rules", current)
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+            parser().parse_args(["feedback-context", str(self.project)])
+        self.assertEqual(error.exception.code, 2)
 
     def edit(self, transform, comments=None):
         path = self.root / "edited.docx"

@@ -9,6 +9,9 @@ __pycache__/
 # Book sources, per-book production data and local preferences never enter the public repository.
 图书库/
 projects/
+音效库/
+lessons/inbox.yaml
+lessons/.inbox.lock
 style/personal.yaml
 docs/CODEX_ACTIONS.md
 docs/HUMAN_EDITING_VALIDATION.md
