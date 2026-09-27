@@ -116,9 +116,9 @@ sound_design:
     variants_default: 1
     variants_important: 2
     prompt_suffix: "无人声，无音乐"
-  pricing:
-    sfx_model_per_minute: null
-    narration_model_per_10k_chars: null
+  pricing:  # 用户 2026-09-27 核对的豆包账单单价；价格变动时在书目 project.yaml 覆盖
+    sfx_model_per_minute: 1.0             # 豆包音频 1.0：1 元/分钟
+    narration_model_per_10k_chars: 2.8    # 豆包语音合成 2.0：28 元/10 万字符
     currency: CNY
   budget_per_episode: 20
   budget_per_13min:

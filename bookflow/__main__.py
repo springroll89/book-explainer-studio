@@ -124,6 +124,27 @@ def parser() -> argparse.ArgumentParser:
     approve.add_argument("--eps", help="集号或范围，如 1-16、1,3,5")
     approve.add_argument("--quote", required=True, help="用户最近一条确认口令的原话")
     approve.add_argument("--session", choices=["Codex", "Claude Code"], default="Codex")
+    final = sub.add_parser("final", help="把用户已认可的草稿冻结为 final.md（不等于文案确认）")
+    final_actions = final.add_subparsers(dest="action", required=True)
+    final_freeze = final_actions.add_parser("freeze", help="默认取每集最新 draft_vN.md")
+    final_freeze.add_argument("project", type=Path)
+    final_freeze.add_argument("--eps", required=True, help="集号或范围，如 2-16、1,3,5")
+    final_freeze.add_argument("--from", dest="source", help="单集指定版本，如 6 或 draft_v6.md")
+    final_freeze.add_argument("--replace", action="store_true", help="已有不同 final.md 时另存旧版后替换")
+    voices = sub.add_parser("voices", help="对白说话人标注与全季角色音色")
+    voices_actions = voices.add_subparsers(dest="action", required=True)
+    voices_scaffold = voices_actions.add_parser("scaffold", help="为定稿里的每处引号生成待填说话人清单（不覆盖）")
+    voices_scaffold.add_argument("project", type=Path)
+    voices_scaffold.add_argument("--eps", required=True)
+    voices_check = voices_actions.add_parser("check", help="全季汇总：缺标注、缺音色、可复用、未出场")
+    voices_check.add_argument("project", type=Path)
+    voices_check.add_argument("--eps", help="默认全部计划集数")
+    voices_set = voices_actions.add_parser("set", help="写入用户选定的人物音色并升级音色表版本")
+    voices_set.add_argument("project", type=Path)
+    voices_set.add_argument("speaker", help="人物稳定 ID，如 P31")
+    voices_set.add_argument("--voice-id")
+    voices_set.add_argument("--pool", help="改用已确认的共用音色池")
+    voices_set.add_argument("--name")
     dev = sub.add_parser("dev", help="迁移与排查用内部命令")
     dev_commands = dev.add_subparsers(dest="dev_command", required=True)
     migrate_approvals = dev_commands.add_parser("migrate-approvals", help="迁移旧批准并保留原始记录")
@@ -188,6 +209,9 @@ def parser() -> argparse.ArgumentParser:
     sfx_search.add_argument("terms", nargs="+")
     sfx_search.add_argument("--class", dest="sound_class", choices=["ambience", "event", "process", "design", "music"])
     sfx_search.add_argument("--library", type=Path)
+    sfx_harvest = sfx_actions.add_parser("harvest", help="成片或样片确认后，把本集新生成的音效收入共享库（accepted）")
+    sfx_harvest.add_argument("project", type=Path)
+    sfx_harvest.add_argument("--ep", type=int, required=True)
     sfx_add = sfx_actions.add_parser("add", help="复制并登记已有音效；accepted 须有本集确认和制作清单")
     sfx_add.add_argument("project", type=Path)
     sfx_add.add_argument("episode")
@@ -216,6 +240,13 @@ def parser() -> argparse.ArgumentParser:
     test = sub.add_parser("test", help="运行自动测试（默认完整集）")
     test.add_argument("--fast", action="store_true", help="只跑文档/技能卫生、配置与基础规则快速集")
     sub.add_parser("selftest", help="在临时目录运行无模型的文字与静音媒体自检")
+    adopt = sub.add_parser("adopt-legacy", help="收编旧流程已做完的一集成品（不等于样片或成片确认）")
+    adopt.add_argument("project", type=Path)
+    adopt.add_argument("--ep", type=int, required=True)
+    for kind, example in (("mix", "混音"), ("subtitles", "字幕 .srt"), ("storyboard", "分镜"), ("video", "成片视频")):
+        adopt.add_argument(f"--{kind}", required=True, help=f"本集目录内的{example}文件，如 production/av1_build_v3/…")
+    adopt.add_argument("--note", required=True, help="一句说明，如“旧流程 V3，用户已审看”")
+    adopt.add_argument("--replace", action="store_true", help="替换已收编的另一组成品")
     produce = sub.add_parser("produce", help="按清单推进本集音画阶段；正式配音需显式开启付费调用")
     produce.add_argument("project", help="书目项目路径；只读检查时写 check")
     produce.add_argument("episode", help="集号 ep03；只读检查时写项目路径")
@@ -223,7 +254,7 @@ def parser() -> argparse.ArgumentParser:
     produce.add_argument("--until", choices=("cues", "voice", "sfx", "mix", "subs", "storyboard", "images", "render"))
     produce.add_argument("--from", dest="from_stage", choices=("cues", "voice", "sfx", "mix", "subs", "storyboard", "images", "render"))
     produce.add_argument("--test-mode", action="store_true", help="仅限标记 test_fixture_only 的隔离示范项目")
-    produce.add_argument("--allow-paid", action="store_true", help="允许正式配音提交/查询豆包任务；仍须通过守卫与预算")
+    produce.add_argument("--allow-paid", action="store_true", help="允许正式配音（豆包 2.0）与缺失音效（豆包音频 1.0）的付费调用，每次一条；仍须通过守卫与预算")
     jobs = sub.add_parser("jobs", help="生成、领取、验收与串行执行分集任务卡")
     jobs_actions = jobs.add_subparsers(dest="action", required=True)
     jobs_plan = jobs_actions.add_parser("plan")
@@ -374,18 +405,27 @@ def dispatch(args) -> dict | str:
     if cmd == "approve":
         from . import approvals
         gate = approvals.CONFIRMATIONS.get(args.gate, args.gate)
-        episodes = None
-        if args.eps:
-            episodes = []
-            for part in args.eps.split(","):
-                if "-" in part:
-                    start, end = map(int, part.split("-", 1))
-                    if start < 1 or end < start:
-                        raise ValueError("--eps 范围无效")
-                    episodes.extend(range(start, end + 1))
-                else:
-                    episodes.append(int(part))
+        episodes = _episode_list(args.eps) if args.eps else None
         return approvals.record_confirmation(args.project, gate, args.quote, episodes, args.session)
+    if cmd == "adopt-legacy":
+        from .legacy_media import KINDS, adopt as adopt_legacy
+        return adopt_legacy(args.project, args.ep, files={kind: getattr(args, kind) for kind in KINDS},
+                            note=args.note, replace=args.replace)
+    if cmd == "voices":
+        from . import voice_script
+        if args.action == "scaffold":
+            rows = [voice_script.scaffold(args.project, ep) for ep in _episode_list(args.eps)]
+            return {"passed": True, "episodes": rows,
+                    "summary": "；".join(row["summary"] for row in rows),
+                    "next_actions": ["逐条填写 speaker（人物 ID 或 narrator），然后运行 voices check"]}
+        if args.action == "check":
+            from .flow import _planned, _legacy_episodes
+            episodes = _episode_list(args.eps) if args.eps else _planned(Path(args.project).resolve())
+            return voice_script.season(args.project, episodes, skip=_legacy_episodes(Path(args.project).resolve(), episodes))
+        return voice_script.set_voice(args.project, args.speaker, voice_id=args.voice_id, pool=args.pool, name=args.name)
+    if cmd == "final":
+        from .finalize import freeze_many
+        return freeze_many(args.project, _episode_list(args.eps), source=args.source, replace=args.replace)
     if cmd == "dev" and args.dev_command == "migrate-approvals":
         from .approvals import migrate_legacy
         return migrate_legacy(args.project)
@@ -436,6 +476,9 @@ def dispatch(args) -> dict | str:
             return sfx_library.search(args.terms, library=args.library, sound_class=args.sound_class)
         if args.action == "stats":
             return sfx_library.stats(library=args.library)
+        if args.action == "harvest":
+            from .sfx_generate import harvest
+            return harvest(args.project, args.ep)
         return sfx_library.add(args.project, args.episode, args.source, desc=args.desc,
                                tags=[tag.strip() for tag in args.tags.split(",")], sound_class=args.sound_class,
                                status=args.status, loop=args.loop, prompt=args.prompt, model=args.model,
@@ -561,6 +604,24 @@ def _record_cli_failure(args, message: str) -> dict | None:
         return record_script_error(candidate, args.command, message)
     except (OSError, ValueError, yaml.YAMLError):
         return {"status": "warning", "summary": "命令失败已报告，但教训收件箱写入失败；请检查本机目录权限和格式"}
+
+
+def _episode_list(text: str) -> list[int]:
+    episodes: list[int] = []
+    for part in str(text).replace("，", ",").split(","):
+        part = part.strip()
+        if "-" in part:
+            start, end = map(int, part.split("-", 1))
+            if start < 1 or end < start:
+                raise ValueError("--eps 范围无效")
+            episodes.extend(range(start, end + 1))
+        elif part:
+            if int(part) < 1:
+                raise ValueError("--eps 集号必须为正整数")
+            episodes.append(int(part))
+    if not episodes:
+        raise ValueError("--eps 不能为空")
+    return list(dict.fromkeys(episodes))
 
 
 def main() -> int:

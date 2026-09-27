@@ -90,6 +90,7 @@ def reserve(epdir: Path, paragraph: dict, *, cast_sha: str, config_sha: str) -> 
         request_id = str(uuid4())
         job = {"request_id": request_id, "input_key": key, "paragraph_index": paragraph["index"],
                "text_sha256": paragraph["text_sha256"], "voice_cast_sha256": cast_sha,
+               "speaker": paragraph.get("speaker"), "speaker_key": paragraph.get("speaker_key"),
                "config_sha256": config_sha, "unit_price_cny_per_10k": str(unit_price),
                "status": "submitting", "created_at": _now()}
         data["jobs"].append(job)

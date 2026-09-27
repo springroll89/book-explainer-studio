@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from bookflow.common import load_yaml, write_yaml
-from bookflow.jobs import _voice_until_ready, run, summary
+from bookflow.jobs import _sfx_until_ready as _REAL_SFX, _voice_until_ready, run, summary
 
 
 class RealJobRunTests(unittest.TestCase):
@@ -21,6 +21,22 @@ class RealJobRunTests(unittest.TestCase):
         final = self.project / "episodes/ep01/final.md"
         final.parent.mkdir(parents=True)
         final.write_text("测试定稿。\n", encoding="utf-8")
+        # Paid SFX generation has its own tests below; these cover the card runner.
+        sfx = patch("bookflow.jobs._sfx_until_ready", return_value={"passed": True})
+        sfx.start()
+        self.addCleanup(sfx.stop)
+
+    def test_sfx_loop_generates_until_bound_and_stops_on_block(self):
+        steps = [{"passed": True, "progress": "generated"}, {"passed": True, "progress": "generated"},
+                 {"passed": True, "summary": "已绑定已验收音效"}]
+        with patch("bookflow.sfx_stage.advance", side_effect=steps) as advance:
+            self.assertEqual(_REAL_SFX(self.project, 1), {"passed": True})
+        self.assertEqual(advance.call_count, 3)
+        with patch("bookflow.sfx_stage.advance",
+                   return_value={"passed": False, "summary": "音效生成超出本集费用上限"}):
+            blocked = _REAL_SFX(self.project, 1)
+        self.assertEqual((blocked["passed"], blocked["needs_you"]), (False, True))
+        self.assertIn("费用上限", blocked["reason"])
 
     @staticmethod
     def _media(*, until=None, cues_ready=True):

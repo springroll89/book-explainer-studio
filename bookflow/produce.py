@@ -138,9 +138,20 @@ def check(project: Path, episode: str | int, *, until: str | None = None) -> dic
     manifest = _manifest(manifest_path)
     rows = []
     readiness: dict[str, bool] = {}
+    stages_to_check = STAGES[:STAGES.index(until) + 1] if until else STAGES
+    if manifest.get("mode") == "legacy_adopted":
+        from .legacy_media import state as legacy_state
+        ready, reason = legacy_state(epdir, manifest)
+        from .cost import estimate_episode
+        return {"status": "success" if ready else "warning", "passed": True,
+                "summary": "旧流程成品已收编且未变化" if ready else "收编的旧流程成品已失效",
+                "legacy_adopted": True,
+                "stages": [{"stage": stage, "ready": ready, "reason": reason} for stage in stages_to_check],
+                "budget": estimate_episode(Path(project), int(epdir.name[2:])),
+                "next_actions": [] if ready else ["稿件或成品已变化：重新收编新的成品，或移走收编清单后用新流水线重做"],
+                "artifacts": [str(manifest_path)]}
     real = manifest.get("mode") == "real"
     fixture = manifest.get("mode") == "test" and manifest.get("test_fixture_only") is True and _test_fixture(project)
-    stages_to_check = STAGES[:STAGES.index(until) + 1] if until else STAGES
     for stage in stages_to_check:
         record = manifest.get("stages", {}).get(stage, {})
         if real:
@@ -270,6 +281,17 @@ def run(project: Path, episode: str | int, *, test_mode: bool = False,
     epdir, final, _ = _preflight(Path(project).resolve(), episode, test_mode)
     if not test_mode:
         project = Path(project).resolve()
+        if _manifest(epdir / "production/manifest.json").get("mode") == "legacy_adopted":
+            report = check(project, episode, until=until)
+            if all(row["ready"] for row in report["stages"]):
+                return {"status": "success", "passed": True, "summary": "本集为已收编的旧流程成品，无需重做",
+                        "executed": [], "skipped": [row["stage"] for row in report["stages"]],
+                        "next_actions": [], "artifacts": report["artifacts"]}
+            return {"status": "warning", "passed": False,
+                    "summary": "本集是收编的旧流程成品，但稿件或成品文件已变化；新流水线不会覆盖它",
+                    "errors": [report["stages"][0]["reason"]],
+                    "next_actions": ["重新收编新的成品，或把 production/manifest.json 与 approval_assets.yaml 另存后移走再用新流水线重做"],
+                    "artifacts": report["artifacts"]}
         end = STAGES.index(until) if until else len(STAGES) - 1
         if from_stage:
             start = STAGES.index(from_stage)
@@ -292,7 +314,13 @@ def run(project: Path, episode: str | int, *, test_mode: bool = False,
             return advance(project, epdir)
         if STAGES[start] == "sfx":
             from .sfx_stage import advance
-            return advance(project, epdir)
+            return advance(project, epdir, allow_paid=allow_paid)
+        if STAGES[start] in {"storyboard", "images"}:
+            from .visual_stage import advance
+            bound = advance(project, epdir)
+            if not bound["passed"] or (until and STAGES.index(until) <= STAGES.index("images")):
+                return bound
+            return run(project, episode, until=until, allow_paid=allow_paid)
         if STAGES[start] in {"mix", "subs", "render"}:
             executed, skipped, artifacts = [], [], []
             last = None
@@ -303,6 +331,14 @@ def run(project: Path, episode: str | int, *, test_mode: bool = False,
                     if current[stage]["ready"]:
                         skipped.append(stage)
                         continue
+                    if stage in {"storyboard", "images"}:
+                        from .visual_stage import advance as visual_advance
+                        bound = visual_advance(project, epdir)
+                        if bound["passed"]:
+                            executed.extend(bound.get("executed", []))
+                            continue
+                        bound.update(executed=executed, skipped=skipped)
+                        return bound
                     return {"status": "warning", "passed": False,
                             "summary": f"正式制作停在需助手处理的 {stage} 阶段",
                             "executed": executed, "skipped": skipped,
@@ -341,11 +377,9 @@ def run(project: Path, episode: str | int, *, test_mode: bool = False,
                     "next_actions": ["核对守卫、音色和预算后，显式使用 --allow-paid 继续"],
                     "artifacts": []}
         return {"status": "error", "passed": False,
-                "summary": "所需的正式生成/判断适配器尚未接入；未调用音效或生图服务，也未修改本集媒体",
-                "errors": ["正式音效生成尚未接入；本地混音、字幕和渲染可接续已核验产物"],
-                "budget": budget,
-                "next_actions": ["预算已通过；仍须接入正式适配器才可开始付费制作"],
-                "artifacts": []}
+                "summary": f"正式 {STAGES[start]} 阶段没有可用的推进方式；未调用付费服务，也未修改本集媒体",
+                "errors": [f"未处理的阶段：{STAGES[start]}"], "budget": budget,
+                "next_actions": ["运行 produce check 查看阶段状态"], "artifacts": []}
     production = epdir / "production"
     production.mkdir(parents=True, exist_ok=True)
     manifest_path = production / "manifest.json"

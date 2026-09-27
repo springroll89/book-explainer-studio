@@ -277,6 +277,54 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(state["needs_you"], ["文案确认：第 1、12 集"])
         self.assertIn("第 1、12 集", state["next_step"])
 
+    @patch("bookflow.text_checks.check_drafts", return_value={"passed": True, "errors": []})
+    @patch("bookflow.flow.check_plan", return_value={"errors": []})
+    @patch("bookflow.continuity.context", return_value={"complete": True, "errors": []})
+    def test_missing_finals_point_to_freeze_command(self, *_checks):
+        self.prepare_source_plan()
+        write_yaml(self.project / "plan/episodes.yaml", {"episodes": [{"ep": ep} for ep in range(1, 5)]})
+        record_confirmation(self.project, "plan", "拍板方案", verify_transcript=False)
+        for ep in range(1, 5):
+            atomic_write(self.project / f"episodes/ep{ep:02d}/draft_v1.md", "---\nepisode: %d\n---\n测试文本。" % ep)
+        for ep in (1, 2):
+            atomic_write(self.project / f"episodes/ep{ep:02d}/final.md", "测试文本。")
+        write_yaml(self.project / "notes.yaml", {"workflow": {"season_review_status": "completed"}})
+        state = derive(self.project)
+        self.assertEqual(state["stage_index"], 8)
+        self.assertIn("final freeze <项目> --eps 3-4", state["next_step"])
+
+    @patch("bookflow.text_checks.check_drafts", return_value={"passed": True, "errors": []})
+    @patch("bookflow.flow.check_plan", return_value={"errors": []})
+    @patch("bookflow.continuity.context", return_value={"complete": True, "errors": []})
+    def test_season_voice_cast_comes_after_script_confirmation(self, *_checks):
+        from bookflow import voice_script
+        self.prepare_source_plan()
+        write_yaml(self.project / "plan/episodes.yaml", {"episodes": [{"ep": 1}, {"ep": 2}]})
+        record_confirmation(self.project, "plan", "拍板方案", verify_transcript=False)
+        for ep in (1, 2):
+            text = "---\nepisode: %d\n---\n他抬起头：“走吧。”\n" % ep
+            atomic_write(self.project / f"episodes/ep{ep:02d}/draft_v1.md", text)
+            atomic_write(self.project / f"episodes/ep{ep:02d}/final.md", text)
+        write_yaml(self.project / "notes.yaml", {"workflow": {"season_review_status": "completed"}})
+        record_confirmation(self.project, "script", "拍板文案", verify_transcript=False)
+        write_yaml(self.project / "production/voice_cast.yaml", {
+            "revision": 1, "narrator": {"voice_id": "v-n", "status": "confirmed"},
+            "characters": {"P01": {"name": "劳拉", "voice_id": "v-l", "status": "confirmed"}}})
+        state = derive(self.project)
+        self.assertEqual(state["stage_index"], 8)
+        self.assertIn("voices scaffold <项目> --eps 1-2", state["next_step"])
+        for ep, speaker in ((1, "P01"), (2, "P09")):
+            voice_script.scaffold(self.project, ep)
+            path = self.project / f"episodes/ep{ep:02d}/production/voice_script.yaml"
+            data = load_yaml(path)
+            data["quotes"][0]["speaker"] = speaker
+            write_yaml(path, data)
+        state = derive(self.project)
+        self.assertEqual(state["needs_you"], ["角色音色"])
+        self.assertIn("P09，第 2 集共 1 句", state["next_step"])
+        voice_script.set_voice(self.project, "P09", voice_id="v-new", name="新人物")
+        self.assertEqual(derive(self.project)["stage_index"], 9)
+
     def test_import_requires_source_validation_record(self):
         self.prepare_source_plan()
         (self.project / "analysis/source_validation.json").unlink()

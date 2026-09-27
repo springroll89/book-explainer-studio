@@ -60,6 +60,11 @@ class CheckCommandTests(unittest.TestCase):
         revoked = record_confirmation(self.project, "sample", "撤回样片", [1],
                                       session="selftest-fixture", verify_transcript=False)
         self.assertTrue(revoked["passed"], revoked)
+        config_path = self.project / "project.yaml"
+        config = load_yaml(config_path)
+        config.setdefault("sound_design", {})["pricing"] = {  # defaults now carry real prices
+            "narration_model_per_10k_chars": None, "sfx_model_per_minute": None, "currency": "CNY"}
+        write_yaml(config_path, config)
         manifest = self.project / "episodes/ep01/production/manifest.json"
         before = manifest.read_bytes()
         result = self.check()

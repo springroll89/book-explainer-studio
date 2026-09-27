@@ -18,7 +18,7 @@ STAGE_GUIDE = (
     {"name": "方案确认", "actor": "你", "completion": "当前方案交付物有有效的聊天确认记录。"},
     {"name": "全季初稿", "actor": "助手 / 任务队列", "completion": "计划集数均有通过稿件检查的初稿，实际工作前情已补齐并复核。"},
     {"name": "统一改稿", "actor": "你 + 助手", "completion": "项目统一改稿状态已标记完成；后续仍核对全季稿件和连续性。"},
-    {"name": "文案确认", "actor": "你", "completion": "计划集数均有有效文案确认；启用统一前情表时，定稿快照也须有效。"},
+    {"name": "文案确认", "actor": "你", "completion": "计划集数均有有效文案确认；启用统一前情表时，定稿快照也须有效；音色表含角色时，全季对白已标说话人且每个说话人都有确认音色。"},
     {"name": "声音", "actor": "助手 / 本地工具", "completion": "首集 cue、配音、音效绑定、混音与字幕阶段均通过清单检查。"},
     {"name": "画面", "actor": "助手 / 本地工具", "completion": "首集分镜、画面与渲染阶段均通过检查。"},
     {"name": "样片确认", "actor": "你", "completion": "首集带字幕样片有有效的聊天确认记录。"},
@@ -59,6 +59,18 @@ def _planned(project: Path) -> list[int]:
     data = load_yaml(project / "plan/episodes.yaml", {}) or {}
     rows = data if isinstance(data, list) else data.get("episodes", [])
     return sorted({row["ep"] for row in rows if isinstance(row, dict) and type(row.get("ep")) is int})
+
+
+def _legacy_episodes(project: Path, episodes: list[int]) -> set[int]:
+    """Episodes whose adopted pre-pipeline media are still current need no new voicing."""
+    from .legacy_media import MODE, state as legacy_state
+    result = set()
+    for ep in episodes:
+        epdir = project / "episodes" / f"ep{ep:02d}"
+        manifest = load_yaml(epdir / "production/manifest.json", {}) or {}
+        if isinstance(manifest, dict) and manifest.get("mode") == MODE and legacy_state(epdir, manifest)[0]:
+            result.add(ep)
+    return result
 
 
 def _lesson_count(project: Path) -> int:
@@ -205,6 +217,22 @@ def _downstream_impact(project: Path, episode: int, script_state: dict) -> str |
                if isinstance(archive, dict) and archive.get("status") == "complete" else "")
     return (f"第{episode}集文案变化（{detail}）；受影响的已完成下游阶段需核验/重做："
             + "、".join(stale) + restore)
+
+
+def _compact(episodes: list[int]) -> str:
+    """[2, 3, 4, 7] -> "2-4,7" for command arguments and prompts."""
+    parts, start, prev = [], None, None
+    for ep in sorted(set(episodes)):
+        if start is None:
+            start = prev = ep
+        elif ep == prev + 1:
+            prev = ep
+        else:
+            parts.append(f"{start}-{prev}" if prev > start else str(start))
+            start = prev = ep
+    if start is not None:
+        parts.append(f"{start}-{prev}" if prev > start else str(start))
+    return ",".join(parts)
 
 
 def _review_suffix(items: list[str]) -> str:
@@ -397,10 +425,11 @@ def derive(project: Path) -> dict:
     reviewed = (notes.get("workflow", {}) or {}).get("season_review_status") == "completed"
     if not reviewed:
         return step(7, "请你统一修改全季文案；改完后告诉我“改完了”", "你", needs_you="统一改稿")
-    for ep in planned:
-        final = project / "episodes" / f"ep{ep:02d}" / "final.md"
-        if not final.is_file():
-            return step(8, f"把第 {ep} 集已改稿冻结为 final.md 文案确认候选")
+    missing_final = [ep for ep in planned if not (project / "episodes" / f"ep{ep:02d}" / "final.md").is_file()]
+    if missing_final:
+        eps = _compact(missing_final)
+        return step(8, f"按你认可的版本冻结第 {eps} 集定稿：final freeze <项目> --eps {eps}"
+                       "（默认取各集最新草稿；冻结不等于拍板）")
     pending = [ep for ep in planned if script_states[ep]["state"] != "passed"]
     if pending:
         invalidated = [ep for ep in pending if script_states[ep]["state"] == "invalidated"]
@@ -417,6 +446,19 @@ def derive(project: Path) -> dict:
         snapshots = final_snapshot_state(project, planned)
         if not snapshots["passed"]:
             return step(8, "保存并核对已确认文案的定稿前情快照", blocker=snapshots["errors"][0])
+    from . import voice_script
+    if voice_script.required(project):
+        voices = voice_script.season(project, planned, skip=_legacy_episodes(project, planned))
+        unlabelled = voices["missing_scripts"] + voices["invalid_scripts"]
+        if unlabelled:
+            eps = _compact(unlabelled)
+            return step(8, f"为第 {eps} 集标注对白说话人：voices scaffold <项目> --eps {eps}，"
+                           "逐条填写人物 ID 或 narrator 后运行 voices check（可两三集一个会话）")
+        if voices["needs_voice"]:
+            names = "、".join(f"{row['name'] or row['id']}（{row['id']}，第 {_compact(row['episodes'])} 集共 {row['lines']} 句）"
+                              for row in voices["needs_voice"])
+            return step(8, f"请为这些说话人确定音色：{names}；你回复音色后由助手用 voices set 写入音色表",
+                        "你", needs_you="角色音色")
     first = planned[0]
     if not _media_ready(project, first, "audio"):
         return step(9, queued_instruction("audio", first, f"制作第 {first} 集声音与字幕"))

@@ -212,9 +212,15 @@ def _assemble(epdir: Path, settings: dict, planned: dict) -> dict:
             for expected, original in zip(paragraph["sentences"], saved["sentences"]):
                 if expected["text"] != original["text"]:
                     raise ValueError("缓存片段与当前定稿句子不一致")
-                rows.append({"id": expected["id"], "text": expected["text"],
-                             "startTime": round(offset + float(original["startTime"]), 3),
-                             "endTime": round(offset + float(original["endTime"]), 3)})
+                start = round(offset + float(original["startTime"]), 3)
+                end = round(offset + float(original["endTime"]), 3)
+                if rows and rows[-1]["id"] == expected["id"]:
+                    # Multi-voice units cut sentences at quotes; rejoin the fragments.
+                    rows[-1]["text"] += expected["text"]
+                    rows[-1]["endTime"] = end
+                else:
+                    rows.append({"id": expected["id"], "text": expected["text"],
+                                 "startTime": start, "endTime": end})
             offset += float(saved["duration_sec"])
         rows = checked_timing(rows, script_rows(final), voice_duration)
         write_json(Path(timing_name), {"source": "tts", "draft": str(final),
@@ -248,6 +254,8 @@ def _assemble(epdir: Path, settings: dict, planned: dict) -> dict:
                 os.replace(audio_name, output)
                 os.replace(timing_name, timing)
                 sources = [final, final.with_suffix(".sentences.json"), project / "production/voice_cast.yaml"]
+                if planned.get("multi_voice") and (epdir / "production/voice_script.yaml").is_file():
+                    sources.append(epdir / "production/voice_script.yaml")
                 outputs = [output, timing, settings["segments"], *inputs]
                 manifest.setdefault("stages", {})["voice"] = {
                     "status": "done", "inputs": [{"path": str(path.relative_to(project)), "sha256": sha256_file(path)}
@@ -309,7 +317,7 @@ def advance(project: Path, epdir: Path, *, client: DoubaoVoiceClient | None = No
             job = state["job"]
             if state["action"] == "submit":
                 try:
-                    task_id = client.submit(text=missing["text"], speaker=settings["speaker"],
+                    task_id = client.submit(text=missing["text"], speaker=missing.get("speaker") or settings["speaker"],
                                             request_id=job["request_id"], resource_id=settings["resource_id"],
                                             model=settings["model"])
                 except Exception:
