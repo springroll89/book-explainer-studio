@@ -343,9 +343,9 @@ def episode_units(project: Path, ep: int, final: Path, stable: list[dict]) -> li
     return units
 
 
-def unit_sha(text: str, voice: str, narrator_voice: str) -> str:
-    """Narration keeps the plain text hash; other voices are part of the cache key."""
-    payload = text if voice == narrator_voice else f"{voice}\n{text}"
+def unit_sha(text: str, voice: str) -> str:
+    """Every multi-voice unit binds its actual voice, including narration."""
+    payload = f"{voice}\n{text}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

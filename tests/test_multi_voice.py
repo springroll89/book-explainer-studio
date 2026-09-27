@@ -104,15 +104,7 @@ class MultiVoiceTests(unittest.TestCase):
         self.assertEqual(state["state"], "invalid")
         self.assertTrue(any("当前 final.md" in error for error in state["errors"]))
 
-    def test_units_split_quotes_and_timing_rejoins_sentences(self):
-        self.label(["P01", "P02", "narrator"])
-        planned = plan(self.epdir)
-        self.assertTrue(planned["multi_voice"])
-        dialogue = [row for row in planned["paragraphs"] if row["speaker"] != "v-narrator"]
-        self.assertEqual([(row["speaker"], row["text"]) for row in dialogue],
-                         [("v-laura", "钥匙留下。"), ("v-pool", "不行。")])
-        scare = next(row for row in planned["paragraphs"] if "家" in row["text"])
-        self.assertEqual(scare["speaker"], "v-narrator")
+    def _complete_voice(self, planned):
         audio = self.production.parent.parent.parent / "fake.mp3"
         subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
                         "-t", "30", "-y", str(audio)], check=True, capture_output=True)
@@ -127,6 +119,18 @@ class MultiVoiceTests(unittest.TestCase):
             if result.get("executed") == ["voice"]:
                 break
         self.assertEqual(result.get("executed"), ["voice"], result)
+        return fake
+
+    def test_units_split_quotes_and_timing_rejoins_sentences(self):
+        self.label(["P01", "P02", "narrator"])
+        planned = plan(self.epdir)
+        self.assertTrue(planned["multi_voice"])
+        dialogue = [row for row in planned["paragraphs"] if row["speaker"] != "v-narrator"]
+        self.assertEqual([(row["speaker"], row["text"]) for row in dialogue],
+                         [("v-laura", "钥匙留下。"), ("v-pool", "不行。")])
+        scare = next(row for row in planned["paragraphs"] if "家" in row["text"])
+        self.assertEqual(scare["speaker"], "v-narrator")
+        fake = self._complete_voice(planned)
         self.assertIn({"text": "钥匙留下。", "speaker": "v-laura"}, fake.submissions)
         self.assertIn({"text": "不行。", "speaker": "v-pool"}, fake.submissions)
         timing = load_yaml(self.production / "timing.json")
@@ -136,6 +140,30 @@ class MultiVoiceTests(unittest.TestCase):
         self.assertTrue(check(self.project, 1, until="voice")["stages"][1]["ready"])
         inputs = {row["path"] for row in load_yaml(self.production / "manifest.json")["stages"]["voice"]["inputs"]}
         self.assertIn("episodes/ep01/production/voice_script.yaml", inputs)
+
+    def test_swapping_narrator_and_character_does_not_reuse_wrong_voice(self):
+        self.label(["P01", "P02", "narrator"])
+        before = plan(self.epdir)
+        self._complete_voice(before)
+        self.assertTrue(all(row["cached"] for row in plan(self.epdir)["paragraphs"]))
+        path = self.project / "production/voice_cast.yaml"
+        cast = load_yaml(path)
+        cast["narrator"]["voice_id"] = "v-laura"
+        cast["characters"]["P01"]["voice_id"] = "v-narrator"
+        cast["revision"] += 1
+        write_yaml(path, cast)
+        after = plan(self.epdir)
+        self.assertEqual(before["cast_sha256"], after["cast_sha256"])
+        changed = [row for row in after["paragraphs"] if row["speaker_key"] in {"narrator", "P01"}]
+        self.assertTrue(changed)
+        self.assertTrue(all(not row["cached"] for row in changed))
+        unchanged = [row for row in after["paragraphs"] if row["speaker_key"] == "P02"]
+        self.assertTrue(unchanged)
+        self.assertTrue(all(row["cached"] for row in unchanged))
+        regenerated = self._complete_voice(after)
+        self.assertEqual(regenerated.submissions,
+                         [{"text": row["text"], "speaker": row["speaker"]} for row in changed])
+        self.assertTrue(all(row["cached"] for row in plan(self.epdir)["paragraphs"]))
 
     def test_new_character_elsewhere_keeps_this_episode_cache_key(self):
         self.label(["P01", "P02", "narrator"])

@@ -93,6 +93,16 @@ def generate_next(project: Path, epdir: Path, *, client=None) -> dict:
     config = load_config(epdir)
     from .cost import _amount
     price = _amount(config.get("sound_design", {}).get("pricing", {}).get("sfx_model_per_minute"), "音效每分钟单价")
+    from .adapters.doubao_sfx import DoubaoSfxClient, SfxProviderError, prompt_for
+    suffix = str(config.get("sound_design", {}).get("sfx", {}).get("prompt_suffix", ""))
+    try:
+        prompt = prompt_for(cue, suffix)
+        if client is None:
+            client = DoubaoSfxClient()
+    except (SfxProviderError, OSError, ValueError, TypeError):
+        return {"status": "warning", "passed": False, "progress": "client_not_ready",
+                "summary": "音效客户端或本地输入未就绪；未预留请求，也未调用服务商",
+                "next_actions": ["检查本机豆包凭据、配置与 cue 输入，修正后重跑"], "artifacts": []}
     state = reserve(epdir, cue_id)
     action = state["action"]
     if action in {"guard_blocked", "budget_blocked"}:
@@ -108,15 +118,13 @@ def generate_next(project: Path, epdir: Path, *, client=None) -> dict:
     if action == "already_selected":
         return {"status": "success", "passed": True, "summary": f"{cue_id} 已有素材", "executed": []}
     job = state["job"]
-    from .adapters.doubao_sfx import DoubaoSfxClient, SfxProviderError, prompt_for
-    suffix = str(config.get("sound_design", {}).get("sfx", {}).get("prompt_suffix", ""))
     try:
-        client = client or DoubaoSfxClient()
-        result = client.generate(prompt=prompt_for(cue, suffix), request_id=job["request_id"])
+        result = client.generate(prompt=prompt, request_id=job["request_id"])
     except SfxProviderError as exc:
         transition(epdir, job["request_id"], status="failed")
         return {"status": "warning", "passed": False, "progress": "provider_failed",
-                "summary": f"{cue_id} 音效生成失败：{exc}", "next_actions": ["调整 cue 描述后重跑；核对账单是否计费"],
+                "summary": f"{cue_id} 音效生成失败：{exc}",
+                "next_actions": ["已记录失败请求且禁止自动重发；对照豆包账单核对后再人工处理 sfx_jobs.json"],
                 "artifacts": [str(epdir / "production/sfx_jobs.json")]}
     except Exception:
         transition(epdir, job["request_id"], status="unknown")

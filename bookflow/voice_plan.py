@@ -144,7 +144,7 @@ def plan(epdir: Path) -> dict:
     for index, unit in enumerate(units, 1):
         sentences = unit["fragments"]
         name = f"para-{index:04d}.mp3"
-        text_sha = (voice_script.unit_sha(unit["text"], unit["voice"], narrator_voice) if multi
+        text_sha = (voice_script.unit_sha(unit["text"], unit["voice"]) if multi
                     else hashlib.sha256(unit["text"].encode("utf-8")).hexdigest())
 
         def usable(row: dict) -> bool:

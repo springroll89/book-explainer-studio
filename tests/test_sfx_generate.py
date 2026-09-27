@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from bookflow.adapters.doubao_sfx import SfxProviderError
 from bookflow.common import load_yaml, write_json, write_yaml
 from bookflow.selftest import run as selftest_run
 from bookflow.sfx_generate import generate_next
@@ -80,6 +81,33 @@ class SfxGenerateTests(unittest.TestCase):
         self.assertEqual(retry["progress"], "request_unsettled")
         self.assertEqual(len(read(self.epdir)["jobs"]), 1)
         self.assertEqual(load_yaml(self.epdir / "production/manifest.json")["charges"], [])
+
+    def test_local_client_error_does_not_reserve_a_request(self):
+        for error in (SfxProviderError("missing credential"), ValueError("invalid config"),
+                      OSError("unreadable config")):
+            with self.subTest(error=type(error).__name__), \
+                 patch("bookflow.adapters.doubao_sfx.DoubaoSfxClient", side_effect=error):
+                result = generate_next(self.project, self.epdir)
+                self.assertFalse(result["passed"])
+                self.assertEqual(result["progress"], "client_not_ready")
+                self.assertEqual(read(self.epdir)["jobs"], [])
+                self.assertFalse((self.epdir / "production/sfx_jobs.json").exists())
+        fake = FakeSfx(self.audio, 1.0)
+        self.assertTrue(generate_next(self.project, self.epdir, client=fake)["passed"])
+        self.assertEqual(len(fake.calls), 1)
+
+    def test_provider_failure_is_recorded_without_automatic_resend(self):
+        fake = FakeSfx(self.audio, 1.0, fail=SfxProviderError("HTTP 401 fixture rejection"))
+        result = generate_next(self.project, self.epdir, client=fake)
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["progress"], "provider_failed")
+        self.assertEqual(read(self.epdir)["jobs"][0]["status"], "failed")
+        self.assertEqual(load_yaml(self.epdir / "production/manifest.json")["charges"], [])
+        retry_client = FakeSfx(self.audio, 1.0)
+        retry = generate_next(self.project, self.epdir, client=retry_client)
+        self.assertEqual(retry["progress"], "request_unsettled")
+        self.assertEqual(retry_client.calls, [])
+        self.assertEqual(len(read(self.epdir)["jobs"]), 1)
 
     def test_library_candidate_blocks_paid_generation_until_forced(self):
         found = {"items": [{"id": "SFX-0001"}]}

@@ -154,7 +154,7 @@ def reserve(epdir: Path, cue_id: str) -> dict:
 
 
 def transition(epdir: Path, request_id: str, *, status: str, task_id: str | None = None) -> dict:
-    allowed = {"submitting": {"running", "provider_done", "unknown"},
+    allowed = {"submitting": {"running", "provider_done", "failed", "unknown"},
                "running": {"running", "provider_done", "failed", "unknown"},
                "provider_done": {"provider_done", "unknown"},
                "unknown": {"unknown"}, "failed": {"failed"}}
