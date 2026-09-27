@@ -228,7 +228,7 @@ def run_stage(final: Path, stage: str) -> dict:
               "-map", "[a]", "-c:a", "pcm_s16le", paths[0].name], cwd=production)
         timing = json.loads((production / "timing.json").read_text(encoding="utf-8"))
         timing.update(source="mix", audio="production/final_mix.wav",
-                      audio_sha256=sha256_file(paths[0]), duration_sec=DURATION)
+                      audio_sha256=sha256_file(paths[0]), duration_sec=DURATION, cue_timeline=[])
         write_json(paths[1], timing)
     elif stage == "subs":
         timing = json.loads((production / "timing_actual.json").read_text(encoding="utf-8"))

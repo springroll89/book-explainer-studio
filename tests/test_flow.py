@@ -320,10 +320,90 @@ class FlowTests(unittest.TestCase):
             data["quotes"][0]["speaker"] = speaker
             write_yaml(path, data)
         state = derive(self.project)
+        self.assertEqual((state["stage"], state["stage_index"]), ("设计确认", 9))
+        self.assertIn("style_choice.yaml", state["next_step"])
+        self.confirm_design()
+        state = derive(self.project)
         self.assertEqual(state["needs_you"], ["角色音色"])
         self.assertIn("P09，第 2 集共 1 句", state["next_step"])
+        self.assertIn("voices sheet", state["next_step"])
         voice_script.set_voice(self.project, "P09", voice_id="v-new", name="新人物")
-        self.assertEqual(derive(self.project)["stage_index"], 9)
+        self.assertEqual(derive(self.project)["stage"], "声音")
+
+    def confirm_design(self):
+        from bookflow.media_fixture import _png
+        (self.project / "visual").mkdir(exist_ok=True)
+        for name in ("a.png", "b.png", "P01.png"):
+            _png(self.project / "visual" / name)
+        candidates = [{"id": "A", "images": ["visual/a.png"]}, {"id": "B", "images": ["visual/b.png"]}]
+        write_yaml(self.project / "visual/style_choice.yaml", {"candidates": candidates})
+        state = derive(self.project)
+        self.assertEqual(state["needs_you"][-1], "画风选择")
+        self.assertFalse(record_confirmation(self.project, "style", "拍板画风", verify_transcript=False)["passed"])
+        write_yaml(self.project / "visual/style_choice.yaml", {"chosen": "B", "candidates": candidates})
+        self.assertEqual(derive(self.project)["needs_you"][-1], "画风确认")
+        result = record_confirmation(self.project, "style", "拍板画风", verify_transcript=False)
+        self.assertEqual(set(result["record"]["deliverables"]), {"visual/style_choice.yaml", "visual/b.png"})
+        self.assertIn("character_sheet.yaml", derive(self.project)["next_step"])
+        write_yaml(self.project / "visual/character_sheet.yaml",
+                   {"characters": {"P01": {"name": "劳拉", "images": ["visual/P01.png"]}}})
+        self.assertEqual(derive(self.project)["needs_you"][-1], "定妆确认")
+        self.assertTrue(record_confirmation(self.project, "characters", "拍板定妆", verify_transcript=False)["passed"])
+
+    @patch("bookflow.text_checks.check_drafts", return_value={"passed": True, "errors": []})
+    @patch("bookflow.flow.check_plan", return_value={"errors": []})
+    @patch("bookflow.continuity.context", return_value={"complete": True, "errors": []})
+    def test_sound_is_confirmed_per_batch_before_visuals(self, *_checks):
+        self.prepare_source_plan()
+        write_yaml(self.project / "plan/episodes.yaml", {"episodes": [{"ep": ep} for ep in range(1, 5)]})
+        record_confirmation(self.project, "plan", "拍板方案", verify_transcript=False)
+        for ep in range(1, 5):
+            for name in ("draft_v1.md", "final.md"):
+                atomic_write(self.project / f"episodes/ep{ep:02d}" / name, "---\nepisode: %d\n---\n测试文本。\n" % ep)
+        write_yaml(self.project / "notes.yaml", {"workflow": {"season_review_status": "completed"}})
+        record_confirmation(self.project, "script", "拍板文案", verify_transcript=False)
+        self.confirm_design()
+        ready = {(ep, kind): False for ep in range(1, 5) for kind in ("audio", "visual")}
+        sounds, sheets, sample = set(), set(), {"passed": False}
+        real_state = confirmation_state
+
+        def fake_state(project, gate, ep=None):
+            if gate == "sound":
+                return {"state": "passed" if ep in sounds else "pending", "changed_files": []}
+            if gate == "sample":
+                return {"state": "passed" if sample["passed"] else "pending", "changed_files": []}
+            return real_state(project, gate, ep)
+
+        with patch("bookflow.flow._media_ready", side_effect=lambda _p, ep, kind: ready[(ep, kind)]), \
+                patch("bookflow.flow.confirmation_state", side_effect=fake_state), \
+                patch("bookflow.guard.confirmation_state", side_effect=fake_state), \
+                patch("bookflow.audition.sheet_state",
+                      side_effect=lambda _p, ep: {"state": "current" if ep in sheets else "missing"}):
+            self.assertEqual(derive(self.project)["stage"], "声音")
+            ready[(1, "audio")] = True
+            state = derive(self.project)
+            self.assertEqual(state["stage"], "声音")
+            self.assertIn("audition <项目> 1", state["next_step"])
+            sheets.add(1)
+            self.assertEqual(derive(self.project)["needs_you"][-1], "声音确认：第 1 集")
+            sounds.add(1)
+            self.assertEqual(derive(self.project)["stage"], "画面")
+            ready[(1, "visual")] = True
+            self.assertEqual(derive(self.project)["stage"], "样片确认")
+            sample["passed"] = True
+            self.assertIn("第 2 集声音", derive(self.project)["next_step"])
+            ready[(2, "audio")] = True
+            state = derive(self.project)
+            self.assertIn("第 3 集声音", state["next_step"])  # finish the batch's audio first
+            ready[(3, "audio")] = True
+            self.assertIn("audition <项目> 2；audition <项目> 3", derive(self.project)["next_step"])
+            sheets.update({2, 3})
+            state = derive(self.project)
+            self.assertEqual((state["stage"], state["needs_you"][-1]), ("其余集制作", "声音确认：第 2、3 集"))
+            sounds.update({2, 3})
+            self.assertIn("第 2 集分镜", derive(self.project)["next_step"])
+            ready[(2, "visual")] = ready[(3, "visual")] = True
+            self.assertIn("第 4 集声音", derive(self.project)["next_step"])
 
     def test_import_requires_source_validation_record(self):
         self.prepare_source_plan()

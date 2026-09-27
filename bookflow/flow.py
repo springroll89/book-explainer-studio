@@ -13,16 +13,17 @@ from .planning import check_plan
 STAGE_GUIDE = (
     {"name": "建项目", "actor": "助手", "completion": "项目配置有效，轻量 doctor 检查通过。"},
     {"name": "导入原文", "actor": "助手", "completion": "当前原文批次完整，抽查记录与批次指纹有效。"},
-    {"name": "拆书", "actor": "助手", "completion": "逐章笔记、简报、人物与线索资料齐备，机器查漏和覆盖审阅通过。"},
+    {"name": "拆书", "actor": "助手", "completion": "逐章笔记、简报、人物（说话人物含性别、年龄段、性格、简介）与线索资料齐备，机器查漏和覆盖审阅通过。"},
     {"name": "分集", "actor": "助手", "completion": "分集计划存在且结构、覆盖和原文依据检查通过。"},
     {"name": "方案确认", "actor": "你", "completion": "当前方案交付物有有效的聊天确认记录。"},
     {"name": "全季初稿", "actor": "助手 / 任务队列", "completion": "计划集数均有通过稿件检查的初稿，实际工作前情已补齐并复核。"},
     {"name": "统一改稿", "actor": "你 + 助手", "completion": "项目统一改稿状态已标记完成；后续仍核对全季稿件和连续性。"},
-    {"name": "文案确认", "actor": "你", "completion": "计划集数均有有效文案确认；启用统一前情表时，定稿快照也须有效；音色表含角色时，全季对白已标说话人且每个说话人都有确认音色。"},
-    {"name": "声音", "actor": "助手 / 本地工具", "completion": "首集 cue、配音、音效绑定、混音与字幕阶段均通过清单检查。"},
+    {"name": "文案确认", "actor": "你", "completion": "计划集数均有有效文案确认；启用统一前情表时，定稿快照也须有效；音色表含角色时，全季对白已标说话人。"},
+    {"name": "设计确认", "actor": "你 + 助手", "completion": "画风与全书人物定妆各有有效的「拍板画风」「拍板定妆」记录；音色表含角色时，每个说话人都有确认音色（按选音色单）。"},
+    {"name": "声音", "actor": "助手 / 你", "completion": "首集 cue、配音、音效、混音与字幕通过清单检查；首集按试听单有有效的「拍板声音」（沿用旧成品的首集由样片确认一并覆盖）。"},
     {"name": "画面", "actor": "助手 / 本地工具", "completion": "首集分镜、画面与渲染阶段均通过检查。"},
     {"name": "样片确认", "actor": "你", "completion": "首集带字幕样片有有效的聊天确认记录。"},
-    {"name": "其余集制作", "actor": "助手 / 任务队列", "completion": "其余集数的声音和画面阶段均通过清单检查。"},
+    {"name": "其余集制作", "actor": "助手 / 你", "completion": "其余集按批（默认两集）先完成声音并「拍板声音」，再完成画面与渲染。"},
     {"name": "成片确认", "actor": "你", "completion": "计划集数均有当前成片的有效确认记录。"},
     {"name": "导出", "actor": "本地工具", "completion": "各集正式交付包已生成并通过索引检查。"},
     {"name": "归档", "actor": "本地工具 / 你", "completion": "归档副本、哈希清单与本机仅在线状态均核对完成。"},
@@ -447,44 +448,99 @@ def derive(project: Path) -> dict:
         if not snapshots["passed"]:
             return step(8, "保存并核对已确认文案的定稿前情快照", blocker=snapshots["errors"][0])
     from . import voice_script
-    if voice_script.required(project):
-        voices = voice_script.season(project, planned, skip=_legacy_episodes(project, planned))
+    legacy = _legacy_episodes(project, planned)
+    voices = voice_script.season(project, planned, skip=legacy) if voice_script.required(project) else None
+    if voices is not None:
         unlabelled = voices["missing_scripts"] + voices["invalid_scripts"]
         if unlabelled:
             eps = _compact(unlabelled)
             return step(8, f"为第 {eps} 集标注对白说话人：voices scaffold <项目> --eps {eps}，"
-                           "逐条填写人物 ID 或 narrator 后运行 voices check（可两三集一个会话）")
-        if voices["needs_voice"]:
-            names = "、".join(f"{row['name'] or row['id']}（{row['id']}，第 {_compact(row['episodes'])} 集共 {row['lines']} 句）"
-                              for row in voices["needs_voice"])
-            return step(8, f"请为这些说话人确定音色：{names}；你回复音色后由助手用 voices set 写入音色表",
-                        "你", needs_you="角色音色")
+                           "逐条填写人物 ID 或 narrator 后运行 voices check（文字会话收尾时完成）")
+    from .guard import design_required, sound_required
+    if design_required(project):
+        from .approvals import visual_manifest
+        for gate, label, prepare in (
+                ("style", "画风", "按 visual-development 做三种画风候选，写入 visual/style_choice.yaml 请你挑选"),
+                ("characters", "定妆", "按已确认画风为全书出镜人物做定妆册，写入 visual/character_sheet.yaml 并做并排可辨识度检查")):
+            state = confirmation_state(project, gate)
+            if state["state"] == "passed":
+                continue
+            if state["state"] == "invalidated":
+                result["blockers"].append(f"{label}交付物变动：" + "、".join(
+                    str(item["file"]) for item in state["changed_files"]))
+            manifest = visual_manifest(project, gate)
+            if not manifest["passed"]:
+                if gate == "style" and isinstance(manifest.get("data"), dict) and manifest["data"].get("candidates") \
+                        and not manifest["data"].get("chosen"):
+                    return step(9, "请从画风候选中选一种（告诉我编号）；写入 chosen 后你单独回复「拍板画风」",
+                                "你", needs_you="画风选择")
+                return step(9, prepare, blocker=manifest["errors"][0] if (project / manifest["path"]).is_file() else None)
+            return step(9, f"请你查看{'画风小样' if gate == 'style' else '人物定妆册'}（{manifest['path']}）"
+                           f"并单独回复「拍板{label}」", "你", needs_you=f"{label}确认")
+    if voices is not None and voices["needs_voice"]:
+        names = "、".join(f"{row['name'] or row['id']}（{row['id']}，第 {_compact(row['episodes'])} 集共 {row['lines']} 句）"
+                          for row in voices["needs_voice"])
+        return step(9, f"运行 voices sheet <项目> 生成选音色单发给你；请为这些说话人确定音色：{names}；"
+                       "你回复音色后由助手用 voices set 写入音色表", "你", needs_you="角色音色")
+    from .audition import sheet_state
+
+    def sound_step(index: int, eps: list[int]) -> dict | None:
+        waiting = [ep for ep in eps if sound_required(project, ep)
+                   and confirmation_state(project, "sound", ep)["state"] != "passed"]
+        if not waiting:
+            return None
+        for ep in waiting:
+            state = confirmation_state(project, "sound", ep)
+            if state["state"] == "invalidated":
+                result["blockers"].append(f"第 {ep} 集声音已变化，需重新试听：" + "、".join(
+                    str(item["file"]) for item in state["changed_files"]))
+        stale = [ep for ep in waiting if sheet_state(project, ep)["state"] != "current"]
+        if stale:
+            return step(index, "生成试听单：" + "；".join(f"audition <项目> {ep}" for ep in stale)
+                        + "，把混音和试听单一起发给你")
+        span = "、".join(str(ep) for ep in waiting)
+        return step(index, f"请你按试听单试听第 {span} 集混音，没问题单独回复「拍板声音」", "你",
+                    needs_you=f"声音确认：第 {span} 集")
+
     first = planned[0]
     if not _media_ready(project, first, "audio"):
-        return step(9, queued_instruction("audio", first, f"制作第 {first} 集声音与字幕"))
+        return step(10, queued_instruction("audio", first, f"制作第 {first} 集声音与字幕"))
+    waiting = sound_step(10, [first])
+    if waiting:
+        return waiting
     if not _media_ready(project, first, "visual"):
-        return step(10, queued_instruction("visual", first, f"制作第 {first} 集分镜、画面和成片"))
+        return step(11, queued_instruction("visual", first, f"制作第 {first} 集分镜、画面和成片"))
     sample = confirmation_state(project, "sample", first)
     if sample["state"] != "passed":
-        return step(11, f"请你观看第一集带字幕样片{_review_suffix(pending_by_ep.get(first, []))}并回复“拍板样片”",
+        return step(12, f"请你观看第一集带字幕样片{_review_suffix(pending_by_ep.get(first, []))}并回复“拍板样片”",
                     "你", needs_you="样片确认")
-    for ep in planned[1:]:
-        if not (_media_ready(project, ep, "audio") and _media_ready(project, ep, "visual")):
-            stage = "audio" if not _media_ready(project, ep, "audio") else "visual"
-            return step(12, queued_instruction(stage, ep, f"制作第 {ep} 集音画与成片"))
+    size = (config.get("production", {}) or {}).get("batch_size", 2) if isinstance(config, dict) else 2
+    size = size if type(size) is int and size >= 1 else 2
+    rest = planned[1:]
+    for start in range(0, len(rest), size):
+        batch = rest[start:start + size]
+        for ep in batch:
+            if not _media_ready(project, ep, "audio"):
+                return step(13, queued_instruction("audio", ep, f"制作第 {ep} 集声音与字幕（本批：第 {_compact(batch)} 集）"))
+        waiting = sound_step(13, batch)
+        if waiting:
+            return waiting
+        for ep in batch:
+            if not _media_ready(project, ep, "visual"):
+                return step(13, queued_instruction("visual", ep, f"制作第 {ep} 集分镜、画面和成片"))
     for ep in planned:
         if confirmation_state(project, "release", ep)["state"] != "passed":
-            return step(13, f"请你确认第 {ep} 集成片{_review_suffix(pending_by_ep.get(ep, []))}并回复“拍板成片”",
+            return step(14, f"请你确认第 {ep} 集成片{_review_suffix(pending_by_ep.get(ep, []))}并回复“拍板成片”",
                         "你", needs_you="成片确认")
         if not (project / "episodes" / f"ep{ep:02d}" / "deliver/index.html").is_file():
-            return step(14, f"导出第 {ep} 集已确认的交付包", "脚本")
+            return step(15, f"导出第 {ep} 集已确认的交付包", "脚本")
         from .archive import check_complete
         archive_state = check_complete(project, ep)
         if archive_state["pending"]:
-            return step(15, f"归档第 {ep} 集：archive <项目> ep{ep:02d}", "脚本")
+            return step(16, f"归档第 {ep} 集：archive <项目> ep{ep:02d}", "脚本")
         if not archive_state["passed"]:
-            return step(15, f"核对并修复第 {ep} 集归档清单", "脚本", blocker=archive_state["errors"][0])
-    return step(15, "全部已确认集数的归档完成，无待办", "脚本")
+            return step(16, f"核对并修复第 {ep} 集归档清单", "脚本", blocker=archive_state["errors"][0])
+    return step(16, "全部已确认集数的归档完成，无待办", "脚本")
 
 
 def write(project: Path) -> dict:

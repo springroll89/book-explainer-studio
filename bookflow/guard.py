@@ -1,4 +1,4 @@
-"""Stage gate checks based on the four passphrase confirmations.
+"""Stage gate checks based on the passphrase confirmations.
 
 The gate reads ``approvals/log.yaml`` through ``confirmation_state``. Old
 terminal records (G1–G4/AV1/RELEASE files) are no longer an approval source:
@@ -14,7 +14,8 @@ from .common import full_season_review, load_yaml
 TEXT_ACTIONS = ('outline', 'draft', 'review', 'edit-copy')
 MEDIA_ACTIONS = ('sound-plan', 'visual', 'media-generate', 'export-preview')
 DELIVER_ACTIONS = ('export-deliver', 'export-delivery')
-LABELS = {'plan': '方案', 'script': '文案', 'sample': '样片', 'release': '成片'}
+LABELS = {'plan': '方案', 'script': '文案', 'style': '画风', 'characters': '定妆', 'sound': '声音',
+          'sample': '样片', 'release': '成片'}
 SAMPLE_EPISODE = 1  # record_confirmation binds the pilot sample to episode 1
 
 
@@ -30,10 +31,33 @@ def required_confirmations(action: str, ep: int | None = None, *, batch: bool = 
         needed = [('plan', None), ('script', ep)]
         if ep is not None and ep != SAMPLE_EPISODE:
             needed.append(('sample', SAMPLE_EPISODE))
+        if action == 'visual':
+            # Storyboards start only after the look, the character sheet and this episode's sound.
+            needed += [('style', None), ('characters', None), ('sound', ep)]
         return needed
     if action in DELIVER_ACTIONS:
         return [('script', ep), ('release', ep)]
     return []
+
+
+def design_required(project: Path) -> bool:
+    """Style and character sheets gate visuals, except for projects whose sample
+    was confirmed before these confirmations existed and never recorded them."""
+    from .approvals import read_log
+    if any(row.get('gate') in ('style', 'characters') for row in read_log(project)):
+        return True
+    return confirmation_state(project, 'sample', SAMPLE_EPISODE)['state'] != 'passed'
+
+
+def sound_required(project: Path, ep: int) -> bool:
+    """A separate sound confirmation is needed before visuals unless the episode's
+    adopted legacy media, its current sample or its current release already covers it."""
+    from .flow import _legacy_episodes
+    if ep in _legacy_episodes(Path(project).resolve(), [ep]):
+        return False
+    if ep == SAMPLE_EPISODE and confirmation_state(project, 'sample', ep)['state'] == 'passed':
+        return False
+    return confirmation_state(project, 'release', ep)['state'] != 'passed'
 
 
 def _label(gate: str, ep: int | None) -> str:
@@ -58,6 +82,15 @@ def check(project: Path, action: str, ep: int | None = None) -> dict:
     p = Path(project); action = action.replace('_', '-').lower()
     batch = full_season_review(p) and action in TEXT_ACTIONS
     needed = required_confirmations(action, ep, batch=batch)
+    if action == 'visual':
+        try:
+            skip = set() if design_required(p) else {'style', 'characters'}
+            if ep is not None and not sound_required(p, ep):
+                # Adopted legacy audio is judged together with the sample.
+                skip.add('sound')
+        except ValueError:
+            skip = set()
+        needed = [item for item in needed if item[0] not in skip]
     required = [_label(gate, gate_ep) for gate, gate_ep in needed]
     states, errors, warnings, checks = {}, [], [], {}
     legacy = unmigrated_legacy(p)

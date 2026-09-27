@@ -192,11 +192,140 @@ def _names(project: Path, cast: dict) -> dict[str, str]:
     return names
 
 
+PROFILE_FIELDS = {"gender": ("gender", "性别"), "age_group": ("age_group", "年龄段"),
+                  "personality": ("personality", "性格"), "summary": ("summary", "intro", "简介")}
+AGE_GROUPS = ("儿童", "青年", "中年", "老年", "未知")
+
+
+def profiles(project: Path) -> dict[str, dict]:
+    """Casting fields per character ID from analysis/characters.yaml (gender, age group, personality, intro)."""
+    data = load_yaml(Path(project) / "analysis/characters.yaml", {}) or {}
+    rows = data.get("characters", data) if isinstance(data, dict) else data
+    if isinstance(rows, dict):
+        rows = [dict(value, id=key) if isinstance(value, dict) else {"id": key} for key, value in rows.items()]
+    result = {}
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or not isinstance(row.get("id"), str):
+            continue
+        profile = {}
+        for field, keys in PROFILE_FIELDS.items():
+            value = next((row[key] for key in keys if isinstance(row.get(key), str) and row[key].strip()), "")
+            profile[field] = value.strip() if isinstance(value, str) else ""
+        result[row["id"]] = profile
+    return result
+
+
+def quote_sentences(final: Path) -> dict[int, list[str]]:
+    """Map each quote ordinal to the stable sentence IDs it falls in."""
+    info = analyse(final)
+    stable = load_yaml(Path(final).with_suffix(".sentences.json"), {}) or {}
+    ids = [row.get("id") for row in stable.get("sentences", [])] if isinstance(stable, dict) else []
+    result: dict[int, list[str]] = {}
+    index = 0
+    for lines in info["groups"]:
+        for line in lines:
+            for begin, end, _text in line["spans"]:
+                if index >= len(ids):
+                    return result
+                for label in sorted(set(line["labels"][begin:end]) - {0}):
+                    result.setdefault(label, []).append(ids[index])
+                index += 1
+    return result
+
+
+def _voice_label(cast: dict, speaker: str) -> str:
+    entry = (cast.get("characters") or {}).get(speaker)
+    if not isinstance(entry, dict):
+        return "未定"
+    status = "已确认" if entry.get("status") == "confirmed" else "待确认"
+    if entry.get("voice_id"):
+        return f"{entry['voice_id']}（{status}）"
+    if entry.get("voice_pool"):
+        return f"共用音色池 {entry['voice_pool']}（{status}）"
+    return "未定"
+
+
+def casting_sheet(project: Path, episodes: list[int], *, skip: set[int] | None = None) -> dict:
+    """Write production/voice_casting_sheet.md: every labelled speaker with profile, lines and voice."""
+    project = Path(project).resolve()
+    cast = load_cast(project)
+    names, profile = _names(project, cast), profiles(project)
+    usage: dict[str, dict] = {}
+    unlabelled = []
+    for ep in episodes:
+        if skip and ep in skip:
+            continue
+        epdir = project / "episodes" / f"ep{ep:02d}"
+        path = script_path(epdir)
+        if not (epdir / "final.md").is_file():
+            continue
+        if not path.is_file():
+            if analyse(epdir / "final.md")["quotes"]:
+                unlabelled.append(ep)
+            continue
+        for row in (load_yaml(path, {}) or {}).get("quotes") or []:
+            speaker = row.get("speaker") if isinstance(row, dict) else None
+            if not isinstance(speaker, str) or not speaker.strip() or speaker == NARRATOR:
+                continue
+            entry = usage.setdefault(speaker, {"episodes": [], "lines": []})
+            if ep not in entry["episodes"]:
+                entry["episodes"].append(ep)
+            entry["lines"].append(str(row.get("text", "")))
+    order = sorted(usage, key=lambda key: (-len(usage[key]["lines"]), key))
+    rows = []
+    for speaker in order:
+        entry, info = usage[speaker], profile.get(speaker, {})
+        samples = sorted(dict.fromkeys(entry["lines"]), key=len, reverse=True)[:3]
+        confusable = [other for other in order if other != speaker
+                      and set(usage[other]["episodes"]) & set(entry["episodes"])
+                      and info.get("gender") and info.get("gender") == profile.get(other, {}).get("gender")
+                      and info.get("age_group") and info.get("age_group") == profile.get(other, {}).get("age_group")]
+        rows.append({"id": speaker, "name": names.get(speaker, ""), **{field: info.get(field, "") for field in PROFILE_FIELDS},
+                     "episodes": entry["episodes"], "line_count": len(entry["lines"]), "samples": samples,
+                     "voice": _voice_label(cast, speaker), "confusable": confusable})
+    missing_profile = [row["id"] for row in rows if not all(row[field] for field in PROFILE_FIELDS)]
+    bad_age = [row["id"] for row in rows if row["age_group"] and row["age_group"] not in AGE_GROUPS]
+
+    def cell(value: str) -> str:
+        return (value or "未填").replace("|", "／").replace("\n", " ")
+
+    lines = ["# 选音色单", "", f"音色表版本：{cast.get('revision', '未建')}；按台词量排序。"
+             "在「当前音色」一栏未定或待确认的人物，请回复人物 ID 和选定的 voice ID。", ""]
+    if unlabelled:
+        lines += [f"> 注意：第 {'、'.join(map(str, unlabelled))} 集还没标说话人，这些集的人物未计入。", ""]
+    lines += ["| ID | 称呼 | 性别 | 年龄段 | 性格 | 简介 | 出场集 | 句数 | 当前音色 | 同场易混 |",
+              "|---|---|---|---|---|---|---|---|---|---|"]
+    for row in rows:
+        mixed = "、".join(f"{other} {names.get(other, '')}".strip() for other in row["confusable"]) or "—"
+        lines.append(f"| {row['id']} | {cell(row['name'])} | {cell(row['gender'])} | {cell(row['age_group'])} | "
+                     f"{cell(row['personality'])} | {cell(row['summary'])} | {'、'.join(map(str, row['episodes']))} | "
+                     f"{row['line_count']} | {cell(row['voice'])} | {mixed} |")
+    lines += ["", "## 代表台词", ""]
+    for row in rows:
+        lines.append(f"**{row['id']} {row['name']}**")
+        lines += [f"- “{sample}”" for sample in row["samples"]] or ["- （无）"]
+        lines.append("")
+    target = project / "production/voice_casting_sheet.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    warnings = []
+    if missing_profile:
+        warnings.append("characters.yaml 缺少性别/年龄段/性格/简介：" + "、".join(missing_profile))
+    if bad_age:
+        warnings.append("年龄段只用 儿童/青年/中年/老年：" + "、".join(bad_age))
+    if unlabelled:
+        warnings.append("未标说话人的集：" + "、".join(map(str, unlabelled)))
+    return {"passed": not warnings, "status": "success" if not warnings else "warning",
+            "summary": f"选音色单列出 {len(rows)} 个说话人物", "path": str(target), "rows": rows,
+            "warnings": warnings, "artifacts": [str(target)]}
+
+
 def season(project: Path, episodes: list[int], *, skip: set[int] | None = None) -> dict:
     """One view of the whole season: which scripts are missing and which speakers need a voice."""
     project = Path(project).resolve()
     cast = load_cast(project)
     names = _names(project, cast)
+    profile = profiles(project)
     rows, missing_scripts, invalid = [], [], []
     usage: dict[str, dict] = {}
     for ep in episodes:
@@ -217,7 +346,7 @@ def season(project: Path, episodes: list[int], *, skip: set[int] | None = None) 
     needs_voice, reused = [], []
     for speaker, entry in sorted(usage.items()):
         record = {"id": speaker, "name": names.get(speaker, ""), "episodes": entry["episodes"],
-                  "lines": entry["lines"]}
+                  "lines": entry["lines"], **profile.get(speaker, {})}
         if entry["problems"]:
             needs_voice.append({**record, "problems": sorted(entry["problems"])})
         elif speaker != NARRATOR:
