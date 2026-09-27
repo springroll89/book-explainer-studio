@@ -93,6 +93,62 @@ class ApprovalRegressions(unittest.TestCase):
         self.assertEqual(approvals.confirmation_state(self.project, "script", 1)["state"], "pending")
         self.assertEqual(len(list((self.project / "approvals/legacy").glob("*.yaml"))), 2)
 
+    def _valid_legacy(self, gate: str, ep: int | None = None):
+        files, digest = approvals._digest_paths(self.project, gate, ep)
+        self.assertTrue(files, gate)
+        write_yaml(self.project / f"approvals/{gate}-20260101T000000Z.yaml", {
+            "gate": gate, "ep": ep, "object_files": files, "object_sha256": digest,
+            "approved_at": "2026-01-01T00:00:00+00:00",
+        })
+
+    def _plan_and_sample_assets(self):
+        for name in ("analysis/book_brief.md", "analysis/coverage_review.yaml",
+                     "analysis/characters.yaml", "analysis/threads.yaml", "plan/episodes.yaml"):
+            atomic_write(self.project / name, "内容")
+        for name in ("final_mix.wav", "subtitles.srt", "storyboard.yaml", "final.mp4"):
+            atomic_write(self.project / "episodes/ep01/production" / name, "asset")
+
+    def test_migration_never_overrides_new_revocations(self):
+        self._plan_and_sample_assets()
+        for quote in ("拍板方案", "撤回方案"):
+            self.assertTrue(approvals.record_confirmation(self.project, "plan", quote,
+                                                          verify_transcript=False)["passed"])
+        for quote in ("拍板样片", "撤回样片"):
+            self.assertTrue(approvals.record_confirmation(self.project, "sample", quote, [1],
+                                                          verify_transcript=False)["passed"])
+        for gate in ("G1", "G2"):
+            self._valid_legacy(gate)
+        self._valid_legacy("AV1", 1)
+        self.assertEqual(approvals.gate_state(self.project, "AV1", 1), "passed")
+        result = approvals.migrate_legacy(self.project)
+        self.assertTrue(result["passed"], result)
+        self.assertEqual(result["migrated"], [])
+        self.assertEqual(approvals.confirmation_state(self.project, "plan")["state"], "revoked")
+        self.assertEqual(approvals.confirmation_state(self.project, "sample", 1)["state"], "revoked")
+        self.assertEqual(len(list((self.project / "approvals/legacy").glob("*.yaml"))), 3)
+        self.assertTrue((self.project / "approvals/log.yaml").is_file())
+
+    def test_migration_never_revives_an_invalidated_new_confirmation(self):
+        self._plan_and_sample_assets()
+        self.assertTrue(approvals.record_confirmation(self.project, "plan", "拍板方案",
+                                                      verify_transcript=False)["passed"])
+        atomic_write(self.project / "plan/episodes.yaml", "改过的计划")
+        self.assertEqual(approvals.confirmation_state(self.project, "plan")["state"], "invalidated")
+        for gate in ("G1", "G2"):
+            self._valid_legacy(gate)  # bound to the changed plan, so the old gates look valid
+        result = approvals.migrate_legacy(self.project)
+        self.assertEqual(result["migrated"], [])
+        self.assertEqual(approvals.confirmation_state(self.project, "plan")["state"], "invalidated")
+
+    def test_migration_checks_collisions_before_writing(self):
+        self._plan_and_sample_assets()
+        for gate in ("G1", "G2"):
+            self._valid_legacy(gate)
+        atomic_write(self.project / "approvals/legacy/G1-20260101T000000Z.yaml", "旧副本")
+        result = approvals.migrate_legacy(self.project)
+        self.assertFalse(result["passed"])
+        self.assertEqual(approvals.read_log(self.project), [])
+
 
 class ProductionRegressions(unittest.TestCase):
     def setUp(self):

@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from bookflow import sfx_library
+from bookflow.approvals import record_confirmation
 from bookflow.common import load_yaml, sha256_file, write_json, write_yaml
 from bookflow.media_manifest import real_stage_fresh
 from bookflow.produce import check as produce_check, run as produce_run
@@ -196,6 +197,8 @@ class SfxStageTests(unittest.TestCase):
         manifest = load_yaml(self.manifest_path)
         manifest["stages"]["cues"]["outputs"] = [self._row(self.cues, self.epdir)]
         write_json(self.manifest_path, manifest)
+        self.assertTrue(record_confirmation(self.project, "plan", "撤回方案",
+                                            verify_transcript=False)["passed"])
         result = produce_run(self.project, 1, until="sfx")
         self.assertFalse(result["passed"])
         self.assertIn("守卫", result["summary"])

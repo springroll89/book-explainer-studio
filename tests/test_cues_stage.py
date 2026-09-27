@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from bookflow.approvals import record_confirmation
 from bookflow.common import load_yaml, sha256_file, write_json, write_yaml
 from bookflow.media_manifest import real_stage_fresh
 from bookflow.produce import check as produce_check, run as produce_run
@@ -81,7 +82,16 @@ class CuesStageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "无音效理由"):
             bind_existing(self.epdir)
 
+    def test_public_produce_accepts_passphrase_confirmations(self):
+        # Only approvals/log.yaml exists here (no legacy G1-G3 files); the guard must read it.
+        self.assertFalse(list((self.project / "approvals").glob("G*.yaml")))
+        result = produce_run(self.project, 1, until="cues")
+        self.assertTrue(result["passed"], result)
+        self.assertIn("cues", load_yaml(self.manifest_path)["stages"])
+
     def test_public_produce_still_requires_media_guard(self):
+        self.assertTrue(record_confirmation(self.project, "plan", "撤回方案",
+                                            verify_transcript=False)["passed"])
         result = produce_run(self.project, 1, until="cues")
         self.assertFalse(result["passed"])
         self.assertIn("守卫", result["summary"])

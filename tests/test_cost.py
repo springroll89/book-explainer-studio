@@ -31,8 +31,12 @@ class CostTests(unittest.TestCase):
     def _cue(self, identity=""):
         path = self.epdir / "production/sound_cues.yaml"
         data = load_yaml(path)
+        anchor = load_yaml(self.epdir / "final.sentences.json")["sentences"][-1]["id"]
+        data["draft_sha256"] = sha256_file(self.epdir / "final.md")
         data["cues"] = [{"cue_id": "C01", "description": "雨打窗户", "sound_class": "ambience",
-                         "function": "bed", "duration_sec": 60, "status": "planned", "asset_id": identity}]
+                         "function": "bed", "duration_sec": 60, "status": "planned", "asset_id": identity,
+                         "gap_policy": "duck", "level_db": -24, "anchor": {"sentence_id": anchor},
+                         "placement": "before"}]
         write_yaml(path, data)
 
     def test_missing_price_blocks_real_preflight_without_mutating_media(self):
@@ -42,9 +46,15 @@ class CostTests(unittest.TestCase):
         self.assertFalse(estimate["passed"])
         self.assertIsNone(estimate["total_estimated_cny"])
         self.assertTrue(any("单价" in item for item in estimate["blockers"]))
+        # Valid passphrase confirmations let the free cue stage bind on a real manifest;
+        # the attached cost preflight must still fail before any paid voice/sfx stage.
+        write_json(self.epdir / "production/manifest.json", {"mode": "real", "charges": [], "stages": {}})
         result = produce.run(self.project, 1)
-        self.assertFalse(result["passed"])
+        self.assertEqual(result["executed"], ["cues"])
         self.assertEqual(result["budget"]["status"], "warning")
+        self.assertFalse(result["budget"]["passed"])
+        self.assertTrue(any("单价" in item for item in result["budget"]["blockers"]))
+        self.assertEqual(load_yaml(self.epdir / "production/manifest.json")["charges"], [])
         self.assertEqual(sha256_file(self.epdir / "production/final.mp4"), before)
 
     def test_reuse_reduces_reservation_and_only_over_cap_requests_decision(self):

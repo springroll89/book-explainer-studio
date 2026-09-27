@@ -207,6 +207,22 @@ def _downstream_impact(project: Path, episode: int, script_state: dict) -> str |
             + "、".join(stale) + restore)
 
 
+def _review_suffix(items: list[str]) -> str:
+    return "；并一并过目：" + "；".join(items) if items else ""
+
+
+def _pending_acknowledged(project: Path, item: dict) -> bool:
+    """A later sample/release confirmation of the same episode covers a minor text edit."""
+    ep, created = item.get("episode"), str(item.get("created_at") or "")
+    if type(ep) is not int or not created:
+        return False
+    for gate in (("sample", "release") if ep == 1 else ("release",)):
+        state = confirmation_state(project, gate, ep)
+        if state["state"] == "passed" and str(state.get("at") or "") > created:
+            return True
+    return False
+
+
 def derive(project: Path) -> dict:
     project = Path(project).resolve()
     from .doctor import check as doctor_check
@@ -276,9 +292,13 @@ def derive(project: Path) -> dict:
                     blocker=health["errors"][0])
     planned = _planned(project)
     script_states = {ep: confirmation_state(project, "script", ep) for ep in planned}
+    pending_by_ep: dict[int, list[str]] = {}
     for ep in planned:
         script_state = script_states[ep]
-        result["change_pending"].extend(script_state.get("change_pending", []))
+        for item in script_state.get("change_pending_items", []):
+            if not _pending_acknowledged(project, item):
+                pending_by_ep.setdefault(ep, []).append(item["text"])
+        result["change_pending"].extend(pending_by_ep.get(ep, []))
         impact = _downstream_impact(project, ep, script_state)
         if impact:
             result["downstream_impacts"].append(impact)
@@ -404,14 +424,16 @@ def derive(project: Path) -> dict:
         return step(10, queued_instruction("visual", first, f"制作第 {first} 集分镜、画面和成片"))
     sample = confirmation_state(project, "sample", first)
     if sample["state"] != "passed":
-        return step(11, "请你观看第一集带字幕样片并回复“拍板样片”", "你", needs_you="样片确认")
+        return step(11, f"请你观看第一集带字幕样片{_review_suffix(pending_by_ep.get(first, []))}并回复“拍板样片”",
+                    "你", needs_you="样片确认")
     for ep in planned[1:]:
         if not (_media_ready(project, ep, "audio") and _media_ready(project, ep, "visual")):
             stage = "audio" if not _media_ready(project, ep, "audio") else "visual"
             return step(12, queued_instruction(stage, ep, f"制作第 {ep} 集音画与成片"))
     for ep in planned:
         if confirmation_state(project, "release", ep)["state"] != "passed":
-            return step(13, f"请你确认第 {ep} 集成片并回复“拍板成片”", "你", needs_you="成片确认")
+            return step(13, f"请你确认第 {ep} 集成片{_review_suffix(pending_by_ep.get(ep, []))}并回复“拍板成片”",
+                        "你", needs_you="成片确认")
         if not (project / "episodes" / f"ep{ep:02d}" / "deliver/index.html").is_file():
             return step(14, f"导出第 {ep} 集已确认的交付包", "脚本")
         from .archive import check_complete
